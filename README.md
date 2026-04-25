@@ -3,6 +3,48 @@
 <br>
 <br>
 
+## Corben's Parameter Golf Experiments
+
+This public fork tracks my local experiments for OpenAI's Parameter Golf
+challenge. The main thread is an ultra-small-model lane aimed at sub-4MB
+artifacts, plus a parallel sub-16MB lane that borrows the strongest tricks from
+the public leaderboard.
+
+Current focus:
+
+- HRC / mirrored IO-tail architectures, where entry and exit blocks surround a
+  tied recurrent middle, e.g. `012|345|210`.
+- Factored tied embeddings to make 8192-token vocabularies affordable under a
+  very small artifact cap.
+- Train-time mixed precision by layer: q8/q6/q4 outer blocks and ternary
+  repeated core blocks using STE forward views from the first step.
+- LQER low-rank residual sidecars for recovering quantization error while
+  staying under the byte cap.
+- CaseOps / lossless tokenizer experiments and local 2060 SUPER wall-clock
+  matrices before scaling to larger GPU runs.
+
+Important status note: scores in `records/*.md` are local proxy measurements,
+not official leaderboard submissions. They are intended to document the research
+path, candidate selection, and grant-compute plan. The cleaned source in this
+repo is meant to make the approach reviewable and reproducible without checking
+in datasets, checkpoints, or bulky generated run logs.
+
+Useful entry points:
+
+- `train_gpt_ternary.py`: sub-4MB experimental wrapper and profile presets.
+- `train_gpt.py`: main CUDA trainer with HRC, quantized export, LQER, and
+  train-time mixed-quant forward support.
+- `ternary_golf/`: train-time ternary layers and CUDA extension helpers.
+- `scripts/run_sub4_iotail_quant_matrix.py`: IO-tail mixed-precision matrix.
+- `scripts/run_sub4_caseops_wide_matrix.py`: wide/shallow CaseOps matrix.
+- `records/sub4_competitive_plan_20260425.md`: current sub-4MB experiment log.
+- `records/sub16_competitive_plan_20260425.md`: current sub-16MB notes.
+- `GRANT_SUMMARY.md`: short summary written for the compute grant application.
+
+Local generated artifacts are intentionally ignored: `logs/`, `records/*/`,
+`final_model*.pt*`, `data/datasets/`, tokenizer downloads, upstream records,
+virtual environments, and bundled local runtimes.
+
 **OpenAI Model Craft Challenge: Parameter Golf** is a challenge to train the best language model that fits in a 16MB artifact and trains in under 10 minutes on 8xH100s, evaluated by compression on the FineWeb validation set (tokenizer-agnostic, bits per byte).
 
 This challenge is heavily inspired by the [NanoGPT Speedrunning](https://github.com/KellerJordan/modded-nanogpt) challenge, where participants compete to train a model that reaches 3.28 FineWeb validation loss as quickly as possible. We're excited to see how optimizing for a parameter-constrained setting pushes people toward unique architectures (test-time compute, aggressive parameter tying, depth recurrence, low-rank training, ...), compression schemes (low precision, QAT, bitnets, novel tokenizers, ...), and other creative submissions (test-time training, long context, megakernels ...). 

@@ -64,3 +64,37 @@ MATCHED_FINEWEB_GPT2_DECODE_BATCH_SIZE=512
 ```
 
 These control batched tokenizer encoding during shard export, tokenizer thread count, tiktoken thread count, and batched GPT-2 decode for the blobstore docs-cache path.
+
+## Deterministic Tokenizer Fingerprints
+
+For local vocab experiments, emit a stable fingerprint of tokenizer artifacts and
+the manifest pairing used for a dataset:
+
+```bash
+python3 data/tokenizer_fingerprint.py \
+  --tokenizer-model ./data/tokenizers/fineweb_1024_bpe.model \
+  --tokenizer-vocab ./data/tokenizers/fineweb_1024_bpe.vocab \
+  --manifest ./data/manifest.json \
+  --dataset-name fineweb10B_sp1024 \
+  --output ./logs/tokenizer_fingerprint_sp1024.json
+```
+
+The resulting JSON can be checked into run artifacts or referenced from experiment
+ledger entries so tokenizer sweeps remain reproducible.
+
+## Canonical Local Proxy Split
+
+To build a smaller local proxy split from an official cached dataset while keeping
+validation untouched, use:
+
+```bash
+python3 data/create_local_proxy_split.py \
+  --source-dataset ./data/datasets/fineweb10B_sp1024 \
+  --dest-dataset ./data/datasets/fineweb10B_sp1024_proxy20 \
+  --train-shards 20 \
+  --mode hardlink \
+  --metadata-out ./data/datasets/fineweb10B_sp1024_proxy20.split.json
+```
+
+This always keeps all `fineweb_val_*` shards for evaluation and only uses a train
+shard prefix for local training.
