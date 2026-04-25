@@ -1,3 +1,9 @@
+# Parameter Golf Experiments
+
+Sub-4MB and sub-16MB experiments for OpenAI's Parameter Golf challenge,
+including mirrored IO-tail architectures, train-time mixed quantization,
+ternary recurrent cores, and tokenizer/data workflow probes.
+
 <img width="3840" height="1280" alt="1920x640-discord" src="https://github.com/user-attachments/assets/90607b26-171f-476a-90ae-69b9dbb7cb30" />
 
 <br>
@@ -44,6 +50,9 @@ Useful entry points:
 Local generated artifacts are intentionally ignored: `logs/`, `records/*/`,
 `final_model*.pt*`, `data/datasets/`, tokenizer downloads, upstream records,
 virtual environments, and bundled local runtimes.
+
+License: MIT. This repository preserves the upstream Parameter Golf license and
+third-party notices while adding local experiment code, scripts, and records.
 
 **OpenAI Model Craft Challenge: Parameter Golf** is a challenge to train the best language model that fits in a 16MB artifact and trains in under 10 minutes on 8xH100s, evaluated by compression on the FineWeb validation set (tokenizer-agnostic, bits per byte).
 
