@@ -842,3 +842,30 @@ Read: r9 proves the loop index can help when repeats are high, but the extra
 virtual depth slows each step to about `211-215ms` and cuts the 10-minute run to
 only `2791-2850` steps. It does not beat the current promoted q884 r3 legal row:
 `2.5749` BPB at `148.36ms/step`.
+
+## Fixed-5k Loop-Index Depth Comparison
+
+Question: the prior comparison gave each candidate the same local wall-clock
+budget, so faster rows received more optimizer steps. This follow-up gives the
+loop-index rows the same `5000` training steps:
+
+- `i3l3r9_d768e256_q884_coret_lqer_lidx_r6t12`
+- `i5l5r2_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12`
+- `i5l5r9_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12`
+
+New candidate added:
+
+- `i5l5r9_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12`: same d512/e192
+  precision ladder as the prior i5/l5 rows, but `HRC_ROUTE_REPEATS=9`.
+  Route depth is `55` from `10` unique blocks. IO precision is
+  q16/q8/q4/q2, block `4` and loop blocks `5-9` are ternary, and loop index is
+  enabled.
+
+Run:
+
+- record dir: `records/sub4-lidx-fixed5k-depthcompare-20260426-010314`
+- settings: `ITERATIONS=5000`, `MAX_WALLCLOCK_SECONDS=0`,
+  `WARMDOWN_ITERS=5000`, `TRAIN_QUANT_FORWARD=1`, final artifacts,
+  `--allow-over-cap`, idle GPU guard, timeout `3000s` per row.
+- startup plan confirms all three rows have loop index enabled in their
+  candidate definitions.

@@ -111,3 +111,21 @@ engineering interpretation.
    ladders with the same export-honest train-time quant policy.
 5. For sub-16: resume q6 proof with LQER/frozen-carry/publicstack and then test
    speed levers only if the loss curve tracks the conservative baseline.
+
+## Active Fixed-Step Follow-Up
+
+Started 2026-04-26:
+`records/sub4-lidx-fixed5k-depthcompare-20260426-010314`.
+
+Purpose: compare high-recurrence loop-index rows at the same 5k train-step
+budget instead of the same 10-minute wall-clock budget.
+
+Rows:
+
+- `i3l3r9_d768e256_q884_coret_lqer_lidx_r6t12`
+- `i5l5r2_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12`
+- `i5l5r9_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12`
+
+Settings: `ITERATIONS=5000`, `MAX_WALLCLOCK_SECONDS=0`,
+`WARMDOWN_ITERS=5000`, `TRAIN_QUANT_FORWARD=1`, final artifacts,
+`--allow-over-cap`, idle GPU guard, and loop index enabled on all rows.

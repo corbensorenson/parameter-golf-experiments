@@ -650,6 +650,27 @@ CANDIDATES: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "i5l5r9_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12",
+        "base_profile": "i1l2r2_d512_e128_h8kv1_mlpinner_mlp075",
+        "preset": "2060sprint_micro_muon_cooltaper5k_cold_tokens8k",
+        "env": {
+            **route_env(
+                io_width=5,
+                loop_width=5,
+                repeats=9,
+                model_dim=512,
+                embed_dim=192,
+                heads=8,
+                mlp_mult=0.5,
+                io_quant=(16, 8, 4, 2),
+                ternary_start=4,
+                mlp_only_start=5,
+            ),
+            **lqer_env(rank=6, top_k=12),
+            **loop_index_env(dim=32, scale_init=0.03),
+        },
+    },
+    {
         "name": "i5l5r2_d448e160_q16q8q4q2t_coret_lqer_lidx_r6t12",
         "base_profile": "i1l2r2_d448_e128_h7kv1_mlpinner_mlp10",
         "preset": "2060sprint_micro_muon_cooltaper5k_cold_tokens8k",
