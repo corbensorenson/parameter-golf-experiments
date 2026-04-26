@@ -36,11 +36,12 @@ train-time quantization, and careful byte spending:
 
 | Lane | What it tests | Current local read |
 | --- | --- | --- |
-| Sub-4MB shallow HRC | Wide, shallow, fast `i1l2r2` models with cool taper schedules | Best local proxy around `2.7573` BPB, `70.6ms/step`, `2.86MB` artifact |
-| Sub-4MB IO-tail + LQER | Mirrored route, q8/q6/q4 IO layers, ternary core, LQER sidecars | Best 3k proxy around `2.7550` BPB, `162.5ms/step`, `3.47MB` artifact |
-| Train-time quant matrix | Checks whether q8/q6/q4/ternary training from step one beats export-only quantization | Active candidate family includes `i3l3r3`, `i6l9r3`, q864/q884/q886 ladders |
-| Sub-16MB transfer lane | Ports useful sub-4 speed and quality levers into a less byte-starved model | q6 proof profiles plus LQER, frozen carry, fused QKV, and fp16 Muon probes |
-| Tokenizer lane | Lossless CaseOps, word-boundary BPE/Unigram, vocab sweeps | Tracked in tokenizer research docs; no lossy tokenizer shortcuts |
+| Promoted sub-4MB q884 IO-tail | `i3l3r3`, q8/q8/q4 IO blocks, ternary core, LQER, train-time quantized forward | Best clean legal row: `2.5749` BPB, `148.36ms/step`, `3,967,875` bytes |
+| Soft-cap q884 quality reference | Same family with slightly larger residual spend | `2.5505` BPB, but `4,035,469` bytes, about `35KB` over the decimal 4MB goal |
+| Precision-ladder IO tail | q16/q8/q4/q2/ternary entry and mirrored exit from the first training step | Legal and fast; best row `2.9888` BPB, so d512/e192 is under-capacity |
+| Loop-index recurrence | Whether the looped middle benefits from virtual-position information | Helps r9 and i5/l5, hurts q884 r3; do not enable blindly |
+| Sub-16MB transfer lane | Ports useful sub-4 speed and quality levers into a less byte-starved model | Local q6 proof baseline: `1.7567` final BPB, `9.27MB` artifact |
+| Tokenizer lane | Lossless CaseOps, word-boundary BPE/Unigram, vocab sweeps | Legal path is exact byte sidecars and reversible transforms, not lossy whole-word shortcuts |
 
 These are local proxy numbers, not official leaderboard submissions. The
 experiment records are meant to explain candidate selection and grant-compute
@@ -65,6 +66,8 @@ priorities, not claim final scores.
 - `data/README.md` - dataset, tokenizer, fingerprint, and local proxy split
   workflows.
 - `records/*.md` - human-written experiment ledgers and current conclusions.
+- `records/experiment_synthesis_20260426.md` - compact read of the current
+  state across sub-4, sub-16, tokenizer, and systems work.
 - `GRANT_SUMMARY.md` - short grant-application summary.
 
 Generated run directories, checkpoints, datasets, tokenizer downloads, virtual

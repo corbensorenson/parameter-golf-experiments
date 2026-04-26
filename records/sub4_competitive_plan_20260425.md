@@ -2,6 +2,31 @@
 
 Date: 2026-04-25
 
+## Executive State As Of 2026-04-26
+
+The current promoted clean sub-4MB row is
+`i3l3r3_d768e256_q884_coret_lqer_r6t12`: final export `2.5749` BPB,
+`148.36ms/step`, `4046` wall-clock-stop steps, `3,967,875` bytes, and
+`32,125` bytes of decimal 4MB headroom.
+
+What has been tested and learned:
+
+- q884 IO-tail with train-time quantized forward is the best local direction.
+- A slightly over-cap q884 row reached `2.5505` BPB at `4,035,469` bytes, so
+  there is a useful soft-cap quality reference if we can shave another 35KB.
+- Export-only quantization is not trustworthy for this lane; use
+  `TRAIN_QUANT_FORWARD=1` and compare final export round trips.
+- Loop index is route-specific. It hurt q884 r3, helped i5/l5, and helped r9,
+  but r9 was too slow to beat q884 r3 in a 10-minute local run.
+- The q16/q8/q4/q2/ternary i5/l5 precision ladder is implemented correctly from
+  the first training step, but d512/e192 is under-capacity.
+- `LQER_FACTOR_BITS` was not a useful byte lever while asymmetric LQER is
+  enabled; rank and top-K were the byte/quality knobs.
+
+Current recommendation: spend effort on widening or improving the q884 r3 lane,
+not adding more repeated depth. For H100 experiments, test the same
+export-honest q884/CaseOps setup on wider capacity ladders.
+
 ## Public Baseline To Beat
 
 Current online audit:
@@ -22,10 +47,10 @@ Sources:
 - <https://github.com/openai/parameter-golf/pull/1795>
 - <https://github.com/openai/parameter-golf/issues/1017>
 
-## Diagnosis
+## Historical Diagnosis At Start Of This Pass
 
-Our current promoted sub-4 local lane is technically correct but not yet
-competitive:
+At the start of the 2026-04-25 pass, the promoted sub-4 local lane was
+technically correct but not yet competitive:
 
 - profile: `i1l2r2_d768_e256_h12kv1_mlpinner_mlp075`
 - preset: `2060sprint_micro_muon_cooltaper5k_cold_tokens8k`
@@ -33,9 +58,11 @@ competitive:
 - compressed probe size: about 1.4MB total, leaving about 2.6MB unused under
   the decimal `4000000` byte cap
 
-The gap to the public neural leader is about 1.59 BPB. That is too large for
-schedule tuning alone. The sub-4 lane needs to spend its byte headroom on
-quality and move the serious candidates to 8xH100-scale throughput.
+The then-current gap to the public neural leader was about 1.59 BPB. After the
+q884 train-time quant sweeps, the best clean legal local row improved to
+`2.5749` BPB, but the remaining gap is still far too large for schedule tuning
+alone. The sub-4 lane needs to spend its byte headroom on quality and move the
+serious candidates to 8xH100-scale throughput.
 
 ## Implemented This Pass
 
@@ -238,7 +265,7 @@ Run command:
 .\\.venv-cuda313\\Scripts\\python.exe -u scripts\\run_sub4_caseops_wide_matrix.py --mode local-10k --iterations 10000 --val-tokens 65536 --timeout 2400 --out records\\sub4-caseops-10k-<timestamp> --final-artifacts
 ```
 
-Active run:
+Initial run:
 
 - record dir: `records/sub4-caseops-10k-20260425-054606`
 - runner stdout: `logs/sub4-caseops-10k-20260425-054606.out.txt`
@@ -430,7 +457,7 @@ Fix:
 - Clean wall-clock sweeps should use `--train-quant-forward` without
   `--roundtrip-guard`, so the training loop avoids export/reload conversions.
 
-Active corrected 10-minute wall-clock matrix:
+Corrected 10-minute wall-clock matrix:
 
 - record dir: `records/sub4-trainquant-clean-wallclock10m-20260425-190647`
 - settings: `TRAIN_QUANT_FORWARD=1`, `QUANT_TRAIN_MODE=none`,
@@ -468,7 +495,7 @@ Completion update:
   `--idle-seconds`, and `--idle-poll-seconds` so future wall-clock sweeps can
   avoid starting candidates while the GPU is busy.
 
-Active fair rerun:
+Fair rerun:
 
 - record dir: `records/sub4-trainquant-fair-wallclock10m-20260425-202436`
 - candidates:
@@ -558,7 +585,7 @@ soft-cap baseline is clearly better, keep it as the 4MB-plus research lane and
 try to recover the missing `60-100KB` from code size, LQER exclusions, or q4
 payload compression.
 
-Active targeted sweep:
+Targeted sweep:
 
 - record dir: `records/sub4-q884-byte-quality-10m-20260425-211131`
 - settings: 10-minute local wallclock per row, `TRAIN_QUANT_FORWARD=1`,
@@ -622,7 +649,7 @@ New follow-up candidates:
   `i3l3r3_d768e256_q884_coret_lqer_lidx_r6t12`: test whether tiny loop-index
   conditioning helps the looped middle once the byte budget is legal.
 
-Active follow-up:
+Follow-up run:
 
 - record dir: `records/sub4-q884-legal-lidx-10m-20260425-223322`
 - settings: 10-minute local wallclock per row, final artifacts,
@@ -636,7 +663,7 @@ Active follow-up:
   - `i3l3r3_d768e256_q884_coret_lqer_lidx_r6t12`
 - startup check: the first row waited `30.287s` for the idle guard and then
   began training with the GPU at full load.
-- status update:
+- checkpoint before completion:
   - `i3l3r3_d768e256_q884_coret_lqer_t11` hit the 900s runner timeout before
     producing final artifacts.
   - `i3l3r3_d768e256_q884_coret_lqer_r6t14` crashed early with CUDA illegal
@@ -644,8 +671,8 @@ Active follow-up:
   - `i3l3r3_d768e256_q884_coret_lqer_r6t12` completed cleanly and is the first
     clean legal q884 row: final export `2.5749` BPB, `4046` wallclock-stop
     steps, `148.36ms/step`, `3,967,875` bytes, `32,125` bytes of headroom.
-  - `i3l3r3_d768e256_q884_coret_lqer_lidx_t11` is currently running. At 2k
-    steps it was at `2.6387` BPB and `147.17ms/step`.
+  - `i3l3r3_d768e256_q884_coret_lqer_lidx_t11` reached 2k steps at
+    `2.6387` BPB and `147.17ms/step` before later completing as shown below.
 
 Completion:
 
@@ -714,10 +741,10 @@ Validation:
   `scripts/run_sub4_iotail_quant_matrix.py`.
 - `--list` shows all r1/r2/r3 i5/l5 precision-ladder candidates.
 
-Queued matrix:
+Queued matrix, now completed below:
 
 - record dir: `records/sub4-i5l5-precision-ladder-10m-20260425-225433`
-- status: queued behind the active q884 legal/lidx sweep, waiting for runner
+- status at launch: queued behind the q884 legal/lidx sweep, waiting for runner
   PID `11936` before starting.
 - rows:
   - `i5l5r1_d512e192_q16q8q4q2t_coret_lqer_r6t12`
@@ -730,10 +757,10 @@ Queued matrix:
   `TRAIN_QUANT_FORWARD=1`, `QUANT_TRAIN_MODE=none`, `--allow-over-cap`, idle
   guard.
 
-Startup update:
+Startup update during run:
 
-- The q884 sweep finished, so this queued matrix has started.
-- First active row:
+- The q884 sweep finished before this matrix started.
+- First row:
   `i5l5r1_d512e192_q16q8q4q2t_coret_lqer_r6t12`.
 - Startup log confirms the intended precision policy:
   `bits_overrides=blocks.0.:16,blocks.1.:8,blocks.2.:4,blocks.3.:2` and
@@ -770,10 +797,10 @@ Validation:
 - `py_compile` passed after adding both r9 candidates.
 - `--list` shows both r9 rows.
 
-Queued matrix:
+Queued matrix, now completed below:
 
 - record dir: `records/sub4-i3l3r9-loopidx-10m-20260425-234118`
-- status: queued behind the active i5/l5 precision-ladder runner, waiting for
+- status at launch: queued behind the i5/l5 precision-ladder runner, waiting for
   PID `31348` before starting.
 - rows:
   - `i3l3r9_d768e256_q884_coret_lqer_r6t12`

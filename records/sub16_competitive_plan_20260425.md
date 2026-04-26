@@ -96,7 +96,7 @@ tracking the conservative lane, promote the matching 5k profile:
 `loopplain5k_i3l3r3_q6proof_fastfp16` or
 `loopplain5k_i3l3r3_publicstack_q6proof_fastfp16`.
 
-Early baseline from the active conservative row:
+Early baseline from the conservative row:
 `loopplain5k_i3l3r3_q6proof` reached step 1000 at about `712.73ms/step` with
 validation `val_bpb=1.9781` on the local proxy. The speed ladder should be
 judged against that wall-clock number first, then against final validation
@@ -139,9 +139,19 @@ $env:COMP_MATRIX_SUB16_MODE='speed'
 .\\.venv-cuda313\\Scripts\\python.exe scripts\\run_competitive_matrix_2060.py
 ```
 
-Current suite in flight: `logs/competitive-matrix-2060-20260425-031727.suite.txt`.
-The sub-4 export-aware stage completed. The sub-16 baseline q6 proof row
-completed, then the first frozen-carry row stopped because an earlier profile
-used `HRC_FROZEN_CARRY_BLOCKS=all` with only the 3x3 core carry matrix. The
-profile has been corrected to use the default repeated-core selector before the
-next resume run.
+Completed local suite:
+`logs/competitive-matrix-2060-20260425-031727.suite.txt`.
+
+- The sub-4 export-aware stage completed.
+- The sub-16 baseline `loopplain5k_i3l3r3_q6proof` completed: final export
+  `1.7567` BPB, `679.52ms/step` at 5k, `9,268,177` total bytes, and
+  `7,509,039` bytes of headroom under the 16MB cap.
+- The suite then stopped before the frozen-carry/LQER row produced a useful
+  result. The first frozen-carry profile had used `HRC_FROZEN_CARRY_BLOCKS=all`
+  with only the 3x3 core carry matrix. The profile has since been corrected to
+  use the default repeated-core selector before the next resume run.
+
+Current read: the conservative q6 proof baseline is healthy and well under cap.
+The next sub-16 job should resume the corrected LQER/frozen-carry/publicstack
+ladder, then compare speed probes only against rows whose loss movement tracks
+this baseline.

@@ -41,16 +41,21 @@ before scaling to larger GPU runs.
 
 These are local proxy measurements, not official leaderboard submissions.
 
-- Best clean shallow guarded sub-4MB proxy row:
-  `i1l2r2_d768/e256 cooltaper5k_cold_tokens8k`, about `2.7573` export BPB,
-  `70.6 ms/step`, `2.86MB` artifact.
-- Best fixed IO-tail LQER 3k proxy row:
-  `i3l3r3_d768e256_q864_coret_lqer`, about `2.7550` export BPB,
-  `162.5 ms/step`, `3.47MB` artifact, strict final reload clean.
-- Active next matrix:
-  six 10-minute wall-clock sub-4MB candidates using `TRAIN_QUANT_FORWARD=1`,
-  mixed q8/q6/q4 IO tails, ternary recurrent cores, LQER, final artifacts, and
-  the decimal 4MB cap.
+- Best clean legal sub-4MB row:
+  `i3l3r3_d768e256_q884_coret_lqer_r6t12`, `2.5749` final export BPB,
+  `148.36 ms/step`, `3,967,875` total bytes.
+- Best soft-cap q884 quality row:
+  `i3l3r3_d768e256_q884_coret_lqer_r6`, `2.5505` final export BPB,
+  but `4,035,469` bytes, about `35KB` over the 4MB goal.
+- Per-layer precision ladder tested from step one:
+  q16/q8/q4/q2/ternary IO tail rows were legal and fast, with best result
+  `2.9888` BPB, but d512/e192 did not have enough capacity.
+- Loop index finding:
+  it helped high-repeat r9 and i5/l5 rows, but hurt the current q884 r3 legal
+  row. It should be treated as a route-specific knob, not a default.
+- Sub-16 transfer baseline:
+  the local q6 proof row reached `1.7567` final export BPB with a `9.27MB`
+  artifact, leaving substantial 16MB headroom.
 
 ## Why More Compute Helps
 
@@ -68,4 +73,3 @@ competition question: which candidates are genuinely best under the official
 The development grant tier is the right fit: the approach is concrete and
 implemented locally, but needs more GPU time to turn promising proxy signals
 into official-quality submissions.
-
