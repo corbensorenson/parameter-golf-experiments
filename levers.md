@@ -127,6 +127,9 @@ Knobs:
 - `VOCAB_MOE_MODE=static|hybrid|hidden`
 - `VOCAB_MOE_LAYERS=input|loop_first|loop_every3|...`
 - `VOCAB_MOE_TRAIN_QUANT_BITS=6`
+- `VOCAB_MOE_SITE_BIAS_ENABLED=1`
+- `VOCAB_MOE_SITE_SCALE_ENABLED=1`
+- `QUANT_FORCE_PATTERNS=vocab_moe.token_prior.weight,vocab_moe.down,vocab_moe.up`
 - runner: `scripts/run_16mb_vocab_moe_matrix.py`
 
 Design:
@@ -138,6 +141,9 @@ Design:
   is a pure hidden-state router control.
 - The adapter can run at the embedding, selected virtual layers, or HRC loop
   aliases such as `loop_first` and `loop_every3`.
+- When multiple sites are active, small learned site biases/scales let the same
+  token-conditioned expert bank behave differently at embedding, loop-entry, and
+  repeated-loop positions.
 
 Why this is in the 16MB lane:
 
@@ -145,8 +151,8 @@ Why this is in the 16MB lane:
 - In the 16MB lane, it is a clean way to buy token-specialized behavior while
   keeping matmuls batched and GPU-friendly.
 - The matrix trains the VocabMoE expert weights and token priors with fake q6
-  from the start (`VOCAB_MOE_TRAIN_QUANT_BITS=6`) and keeps final artifact
-  round-trip enabled, so the score is the exported model rather than a
+  from the start (`VOCAB_MOE_TRAIN_QUANT_BITS=6`) and force-quantizes those
+  same tensors at export, so the score is the exported model rather than a
   full-precision training-only proxy.
 
 Queued local probes:
@@ -156,8 +162,21 @@ Queued local probes:
 - `i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_loopfirst`
 - `i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_input_loopfirst`
 - `i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_loopevery3`
+- `i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_loopall`
+- `i3l3r3_d640e256_q6_vocabmoe_hidden_k16r2_loopfirst`
 - `i3l3r3_d640e256_q6_vocabmoe_hybrid_k32r1_loopfirst`
+- `i3l3r3_d640e256_q6_vocabmoe_hybrid_k8r4_loopfirst`
+- `i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r4_loopfirst`
+- `i3l3r3_d640e256_q6_vocabmoe_hybrid_k32r2_loopfirst`
+- `i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_loopfirst_t07`
+- `i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_loopfirst_t15`
+- `i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_loopfirst_nosite`
+- `i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_input_loopevery3`
 - `i4l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_loopfirst`
+- `i3l5r2_d640e256_q6_vocabmoe_hybrid_k16r2_loopfirst`
+- `i4l5r2_d640e256_q6_vocabmoe_hybrid_k16r2_loopfirst`
+- `i3l3r3_d768e256_q6_vocabmoe_hybrid_k16r2_loopfirst`
+- `i3l3r3_d768e320_q6_vocabmoe_hybrid_k16r2_loopfirst`
 
 Current read:
 

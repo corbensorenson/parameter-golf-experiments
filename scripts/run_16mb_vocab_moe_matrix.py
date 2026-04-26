@@ -81,6 +81,10 @@ def vocab_moe_env(
     layers: str,
     scale: float = 0.05,
     up_init: float = 0.001,
+    temperature: float = 1.0,
+    activation: str = "relu2",
+    site_bias: bool = True,
+    site_scale: bool = True,
     train_quant_bits: int = 6,
 ) -> dict[str, str]:
     return {
@@ -93,9 +97,13 @@ def vocab_moe_env(
         "VOCAB_MOE_PRIOR_INIT_STD": "0.0",
         "VOCAB_MOE_DOWN_INIT_STD": "0.02",
         "VOCAB_MOE_UP_INIT_STD": f"{up_init:g}",
-        "VOCAB_MOE_TEMPERATURE": "1.0",
-        "VOCAB_MOE_ACTIVATION": "relu2",
+        "VOCAB_MOE_TEMPERATURE": f"{temperature:g}",
+        "VOCAB_MOE_ACTIVATION": activation,
         "VOCAB_MOE_TRAIN_QUANT_BITS": str(train_quant_bits),
+        "VOCAB_MOE_SITE_BIAS_ENABLED": "1" if site_bias else "0",
+        "VOCAB_MOE_SITE_SCALE_ENABLED": "1" if site_scale else "0",
+        "VOCAB_MOE_SITE_SCALE_INIT": "1.0",
+        "QUANT_FORCE_PATTERNS": "vocab_moe.token_prior.weight,vocab_moe.down,vocab_moe.up",
     }
 
 
@@ -138,12 +146,91 @@ CANDIDATES: list[dict[str, Any]] = [
         "notes": "regular token-conditioned repair through the recurrent middle",
     },
     {
+        "name": "i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_loopall",
+        "env": {
+            **BASE_16MB,
+            **vocab_moe_env(experts=16, rank=2, mode="hybrid", layers="loop"),
+        },
+        "notes": "maximal repeated-core token conditioning; slower but high-signal",
+    },
+    {
+        "name": "i3l3r3_d640e256_q6_vocabmoe_hidden_k16r2_loopfirst",
+        "env": {
+            **BASE_16MB,
+            **vocab_moe_env(experts=16, rank=2, mode="hidden", layers="loop_first"),
+        },
+        "notes": "hidden-state router only, checks whether token priors matter",
+    },
+    {
         "name": "i3l3r3_d640e256_q6_vocabmoe_hybrid_k32r1_loopfirst",
         "env": {
             **BASE_16MB,
             **vocab_moe_env(experts=32, rank=1, mode="hybrid", layers="loop_first"),
         },
         "notes": "more token clusters at similar expert parameter cost",
+    },
+    {
+        "name": "i3l3r3_d640e256_q6_vocabmoe_hybrid_k8r4_loopfirst",
+        "env": {
+            **BASE_16MB,
+            **vocab_moe_env(experts=8, rank=4, mode="hybrid", layers="loop_first"),
+        },
+        "notes": "fewer token clusters with richer per-expert rank",
+    },
+    {
+        "name": "i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r4_loopfirst",
+        "env": {
+            **BASE_16MB,
+            **vocab_moe_env(experts=16, rank=4, mode="hybrid", layers="loop_first"),
+        },
+        "notes": "more rank at the same expert count",
+    },
+    {
+        "name": "i3l3r3_d640e256_q6_vocabmoe_hybrid_k32r2_loopfirst",
+        "env": {
+            **BASE_16MB,
+            **vocab_moe_env(experts=32, rank=2, mode="hybrid", layers="loop_first"),
+        },
+        "notes": "larger adapter for the 16MB lane, tests byte-for-quality spend",
+    },
+    {
+        "name": "i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_loopfirst_t07",
+        "env": {
+            **BASE_16MB,
+            **vocab_moe_env(experts=16, rank=2, mode="hybrid", layers="loop_first", temperature=0.7),
+        },
+        "notes": "sharper routing distribution",
+    },
+    {
+        "name": "i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_loopfirst_t15",
+        "env": {
+            **BASE_16MB,
+            **vocab_moe_env(experts=16, rank=2, mode="hybrid", layers="loop_first", temperature=1.5),
+        },
+        "notes": "softer routing distribution",
+    },
+    {
+        "name": "i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_loopfirst_nosite",
+        "env": {
+            **BASE_16MB,
+            **vocab_moe_env(
+                experts=16,
+                rank=2,
+                mode="hybrid",
+                layers="loop_first",
+                site_bias=False,
+                site_scale=False,
+            ),
+        },
+        "notes": "ablation for site bias/scale controls",
+    },
+    {
+        "name": "i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_input_loopevery3",
+        "env": {
+            **BASE_16MB,
+            **vocab_moe_env(experts=16, rank=2, mode="hybrid", layers="input,loop_every3"),
+        },
+        "notes": "input feature plus recurrent repair sites",
     },
     {
         "name": "i4l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_loopfirst",
@@ -153,6 +240,46 @@ CANDIDATES: list[dict[str, Any]] = [
             **vocab_moe_env(experts=16, rank=2, mode="hybrid", layers="loop_first"),
         },
         "notes": "wider mirrored IO tail with the same first-loop adapter",
+    },
+    {
+        "name": "i3l5r2_d640e256_q6_vocabmoe_hybrid_k16r2_loopfirst",
+        "env": {
+            **BASE_16MB,
+            **plain_loop_route(3, 5, 2),
+            **vocab_moe_env(experts=16, rank=2, mode="hybrid", layers="loop_first"),
+        },
+        "notes": "more unique loop blocks, fewer repeats, same adapter",
+    },
+    {
+        "name": "i4l5r2_d640e256_q6_vocabmoe_hybrid_k16r2_loopfirst",
+        "env": {
+            **BASE_16MB,
+            **plain_loop_route(4, 5, 2),
+            **vocab_moe_env(experts=16, rank=2, mode="hybrid", layers="loop_first"),
+        },
+        "notes": "more IO and more unique loop capacity",
+    },
+    {
+        "name": "i3l3r3_d768e256_q6_vocabmoe_hybrid_k16r2_loopfirst",
+        "env": {
+            **BASE_16MB,
+            "MODEL_DIM": "768",
+            "NUM_HEADS": "12",
+            "FACTORED_EMBED_DIM": "256",
+            **vocab_moe_env(experts=16, rank=2, mode="hybrid", layers="loop_first"),
+        },
+        "notes": "width spend probe; may be slower on the 2060 but valuable for H100 planning",
+    },
+    {
+        "name": "i3l3r3_d768e320_q6_vocabmoe_hybrid_k16r2_loopfirst",
+        "env": {
+            **BASE_16MB,
+            "MODEL_DIM": "768",
+            "NUM_HEADS": "12",
+            "FACTORED_EMBED_DIM": "320",
+            **vocab_moe_env(experts=16, rank=2, mode="hybrid", layers="loop_first"),
+        },
+        "notes": "wider embedding factor with Vocab-MoE",
     },
 ]
 
@@ -186,6 +313,8 @@ def write_candidate_plan(out_dir: Path, candidates: list[dict[str, Any]], iterat
             moe = (
                 f"k={env['VOCAB_MOE_EXPERTS']} r={env['VOCAB_MOE_RANK']} "
                 f"mode={env['VOCAB_MOE_MODE']} layers={env['VOCAB_MOE_LAYERS']} "
+                f"temp={env['VOCAB_MOE_TEMPERATURE']} "
+                f"site={env['VOCAB_MOE_SITE_BIAS_ENABLED']}/{env['VOCAB_MOE_SITE_SCALE_ENABLED']} "
                 f"train_q={env['VOCAB_MOE_TRAIN_QUANT_BITS']}"
             )
         route = (

@@ -158,6 +158,8 @@ python scripts/bench_packed_ternary_linear.py
   selected virtual HRC layers.
 - `VOCAB_MOE_TRAIN_QUANT_BITS=6` - trains the Vocab-MoE adapter against a q6
   forward view from the first step.
+- `QUANT_FORCE_PATTERNS=vocab_moe.token_prior.weight,vocab_moe.down,vocab_moe.up`
+  keeps Vocab-MoE train/export precision aligned for truthful matrix scores.
 - `TRAIN_FUSED_QKV=1`, `USE_GRAD_SCALER=0`, `MUON_DTYPE=fp16` - speed probes
   carried from sub-4 into sub-16.
 

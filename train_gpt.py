@@ -108,6 +108,9 @@ class Hyperparameters:
     vocab_moe_temperature = float(os.environ.get("VOCAB_MOE_TEMPERATURE", "1.0"))
     vocab_moe_activation = os.environ.get("VOCAB_MOE_ACTIVATION", "relu2").strip().lower()
     vocab_moe_train_quant_bits = int(os.environ.get("VOCAB_MOE_TRAIN_QUANT_BITS", "0"))
+    vocab_moe_site_bias_enabled = bool(int(os.environ.get("VOCAB_MOE_SITE_BIAS_ENABLED", "1")))
+    vocab_moe_site_scale_enabled = bool(int(os.environ.get("VOCAB_MOE_SITE_SCALE_ENABLED", "1")))
+    vocab_moe_site_scale_init = float(os.environ.get("VOCAB_MOE_SITE_SCALE_INIT", "1.0"))
     depth_lora_rank = int(os.environ.get("DEPTH_LORA_RANK", "0"))
     hrc_mirror_mode = os.environ.get("HRC_MIRROR_MODE", "signperm").strip().lower()
     hrc_depth_schedule_mode = os.environ.get("HRC_DEPTH_SCHEDULE_MODE", "cycle").strip().lower()
@@ -269,6 +272,11 @@ class Hyperparameters:
             "QUANT_INT8_PROMOTE_PATTERNS",
             "tok_emb.weight,lm_head.weight,embed_proj",
         ).split(",")
+        if pattern
+    )
+    quant_force_patterns = tuple(
+        pattern
+        for pattern in os.environ.get("QUANT_FORCE_PATTERNS", "").split(",")
         if pattern
     )
     quant_ternary_patterns = tuple(
@@ -988,7 +996,7 @@ CONTROL_TENSOR_NAME_PATTERNS = tuple(
             "council_prior_logits,council_confidence_scale,council_entropy_threshold,"
             "council_entropy_sharpness,"
             "cycle_fuse_weights,cycle_fuse_tap_scales,"
-            "vocab_moe.scale"
+            "vocab_moe.scale,vocab_moe_site_bias,vocab_moe_site_scales"
         ),
     ).split(",")
     if pattern
@@ -1155,6 +1163,10 @@ def use_ternary_quant(name: str) -> bool:
     return bool(Hyperparameters.quant_ternary_patterns) and any(
         pattern in name for pattern in Hyperparameters.quant_ternary_patterns
     ) and not any(pattern in name for pattern in Hyperparameters.quant_ternary_exclude_patterns)
+def force_quant_tensor(name: str) -> bool:
+    return bool(Hyperparameters.quant_force_patterns) and any(
+        pattern in name for pattern in Hyperparameters.quant_force_patterns
+    )
 def use_lqer_quant(name: str, t: Tensor) -> bool:
     if not Hyperparameters.lqer_enabled or Hyperparameters.lqer_top_k <= 0:
         return False
@@ -1450,9 +1462,12 @@ def quantize_state_dict_int8(state_dict: dict[str, Tensor]):
             passthrough[name] = t
             add_export_payload("passthrough", tensor_nbytes(t))
             continue
-        # Small float tensors are cheap enough to keep directly. We still downcast
-        # fp32/bf16 passthrough tensors to fp16 so metadata does not dominate size.
-        if t.numel() <= INT8_KEEP_FLOAT_MAX_NUMEL:
+        force_quant = force_quant_tensor(name)
+        # Small float tensors are cheap enough to keep directly unless an
+        # experiment explicitly asks for train/export precision alignment.
+        # We still downcast fp32/bf16 passthrough tensors to fp16 so metadata
+        # does not dominate size.
+        if t.numel() <= INT8_KEEP_FLOAT_MAX_NUMEL and not force_quant:
             kept = keep_float_tensor(name, t, passthrough_orig_dtypes)
             passthrough[name] = kept
             add_export_payload("passthrough", tensor_nbytes(kept))
@@ -2908,8 +2923,10 @@ class VocabMoELite(nn.Module):
         if self.mode in {"hybrid", "hidden"}:
             self.router = CastedLinear(self.dim, self.num_experts, bias=False)
             self.router._zero_init = True
-        self.down = nn.Parameter(torch.empty((self.num_experts, self.dim, self.rank), dtype=torch.float32))
-        self.up = nn.Parameter(torch.empty((self.num_experts, self.rank, self.dim), dtype=torch.float32))
+        # Store bases as 2D matrices so train-time STE and export quantization
+        # both use per-row scales. Conceptually these are E x D x R and E x D x R.
+        self.down = nn.Parameter(torch.empty((self.num_experts * self.rank, self.dim), dtype=torch.float32))
+        self.up = nn.Parameter(torch.empty((self.num_experts * self.dim, self.rank), dtype=torch.float32))
         nn.init.normal_(self.down, mean=0.0, std=float(down_init_std))
         if float(up_init_std) > 0.0:
             nn.init.normal_(self.up, mean=0.0, std=float(up_init_std))
@@ -2923,13 +2940,6 @@ class VocabMoELite(nn.Module):
             return weight.to(dtype=work_dtype)
         return linear_fake_quant_ste_weight(weight, bits, work_dtype)
 
-    def _maybe_quant_expert_weight(self, weight: Tensor, work_dtype: torch.dtype, row_width: int) -> Tensor:
-        bits = int(self.train_quant_bits)
-        if bits <= 0 or bits >= 16:
-            return weight.to(dtype=work_dtype)
-        flat = weight.reshape(-1, int(row_width))
-        return linear_fake_quant_ste_weight(flat, bits, work_dtype).reshape_as(weight)
-
     def _activate(self, h: Tensor) -> Tensor:
         if self.activation == "relu2":
             h = F.relu(h)
@@ -2940,23 +2950,37 @@ class VocabMoELite(nn.Module):
             return F.gelu(h)
         return h
 
-    def forward(self, x: Tensor, token_ids: Tensor) -> Tensor:
+    def forward(
+        self,
+        x: Tensor,
+        token_ids: Tensor,
+        site_bias: Tensor | None = None,
+        site_scale: Tensor | None = None,
+    ) -> Tensor:
         work_dtype = x.dtype if x.dtype in {torch.float16, torch.bfloat16} else torch.float32
         x_norm = F.rms_norm(x, (x.size(-1),))
-        prior_weight = self._maybe_quant_2d(self.token_prior.weight, torch.float32)
-        logits = F.embedding(token_ids, prior_weight).float()
         if self.mode == "hidden":
-            logits = torch.zeros_like(logits)
+            logits = x.new_zeros((*token_ids.shape, self.num_experts), dtype=torch.float32)
+        else:
+            prior_weight = self._maybe_quant_2d(self.token_prior.weight, torch.float32)
+            logits = F.embedding(token_ids, prior_weight).float()
         if self.router is not None:
             logits = logits + self.router(x_norm).float()
+        if site_bias is not None:
+            logits = logits + site_bias.float()[None, None, :]
         weights = torch.softmax(logits / self.temperature, dim=-1).to(dtype=x.dtype)
-        down = self._maybe_quant_expert_weight(self.down, work_dtype, self.rank).to(dtype=x.dtype)
-        up = self._maybe_quant_expert_weight(self.up, work_dtype, self.dim).to(dtype=x.dtype)
-        h = torch.einsum("btd,edr->bter", x_norm, down)
+        down = self._maybe_quant_2d(self.down, work_dtype).view(self.num_experts, self.rank, self.dim)
+        up = self._maybe_quant_2d(self.up, work_dtype).view(self.num_experts, self.dim, self.rank)
+        down = down.to(dtype=x.dtype)
+        up = up.to(dtype=x.dtype)
+        h = torch.einsum("btd,erd->bter", x_norm, down)
         h = self._activate(h)
         h = h * weights[..., None]
-        delta = torch.einsum("bter,erd->btd", h, up)
-        return x + self.scale.to(dtype=x.dtype)[0] * delta
+        delta = torch.einsum("bter,edr->btd", h, up)
+        scale = self.scale.to(dtype=x.dtype)[0]
+        if site_scale is not None:
+            scale = scale * site_scale.to(dtype=x.dtype)
+        return x + scale * delta
 def restore_low_dim_params_to_fp32(module: nn.Module) -> None:
     # Keep small/control parameters in fp32 even when the model body runs in bf16.
     with torch.no_grad():
@@ -3658,6 +3682,9 @@ class GPT(nn.Module):
         vocab_moe_temperature: float = 1.0,
         vocab_moe_activation: str = "relu2",
         vocab_moe_train_quant_bits: int = 0,
+        vocab_moe_site_bias_enabled: bool = True,
+        vocab_moe_site_scale_enabled: bool = True,
+        vocab_moe_site_scale_init: float = 1.0,
         smear_gate_enabled: bool = False,
         smear_gate_width: int = 12,
         smear_gate_mode: str = "vector",
@@ -3785,6 +3812,10 @@ class GPT(nn.Module):
         )
         self.vocab_moe_input_enabled = False
         self.vocab_moe_layer_indices: tuple[int, ...] = tuple()
+        self.vocab_moe_input_slot: int | None = None
+        self.vocab_moe_layer_index_to_slot: dict[int, int] = {}
+        self.vocab_moe_site_bias: nn.Parameter | None = None
+        self.vocab_moe_site_scales: nn.Parameter | None = None
         self.num_encoder_layers = total_layers // 2
         self.num_decoder_layers = total_layers - self.num_encoder_layers
         self.num_skip_weights = min(self.num_encoder_layers, self.num_decoder_layers)
@@ -4213,6 +4244,22 @@ class GPT(nn.Module):
                 raise ValueError("VOCAB_MOE_ENABLED=1 requires VOCAB_MOE_LAYERS to select input and/or layers")
             self.vocab_moe_input_enabled = bool(input_enabled)
             self.vocab_moe_layer_indices = tuple(int(idx) for idx in layer_indices)
+            slot = 0
+            if self.vocab_moe_input_enabled:
+                self.vocab_moe_input_slot = slot
+                slot += 1
+            self.vocab_moe_layer_index_to_slot = {}
+            for layer_idx in self.vocab_moe_layer_indices:
+                self.vocab_moe_layer_index_to_slot[int(layer_idx)] = slot
+                slot += 1
+            if slot > 0 and bool(vocab_moe_site_bias_enabled):
+                self.vocab_moe_site_bias = nn.Parameter(
+                    torch.zeros((slot, int(vocab_moe_experts)), dtype=torch.float32)
+                )
+            if slot > 0 and bool(vocab_moe_site_scale_enabled):
+                self.vocab_moe_site_scales = nn.Parameter(
+                    torch.full((slot,), float(vocab_moe_site_scale_init), dtype=torch.float32)
+                )
         self.blocks = nn.ModuleList(blocks)
         self.final_norm = RMSNorm()
         self.lm_head = None if tie_embeddings else CastedLinear(model_dim, vocab_size, bias=False)
@@ -4251,10 +4298,16 @@ class GPT(nn.Module):
         if self.vocab_moe is None:
             return x
         if layer_idx is None:
-            return self.vocab_moe(x, input_ids) if self.vocab_moe_input_enabled else x
-        if int(layer_idx) not in self.vocab_moe_layer_indices:
+            if not self.vocab_moe_input_enabled or self.vocab_moe_input_slot is None:
+                return x
+            slot = self.vocab_moe_input_slot
+        elif int(layer_idx) in self.vocab_moe_layer_index_to_slot:
+            slot = self.vocab_moe_layer_index_to_slot[int(layer_idx)]
+        else:
             return x
-        return self.vocab_moe(x, input_ids)
+        site_bias = self.vocab_moe_site_bias[slot] if self.vocab_moe_site_bias is not None else None
+        site_scale = self.vocab_moe_site_scales[slot] if self.vocab_moe_site_scales is not None else None
+        return self.vocab_moe(x, input_ids, site_bias=site_bias, site_scale=site_scale)
     def _tied_logits(self, x_flat: Tensor, output_mirror_mode: int = 0, output_peer_mode: str = "none") -> Tensor:
         if self.embed_proj_rev is not None:
             x_flat = self.embed_proj_rev(x_flat, mirror_mode=output_mirror_mode)
@@ -5128,6 +5181,9 @@ def main() -> None:
         vocab_moe_temperature=args.vocab_moe_temperature,
         vocab_moe_activation=args.vocab_moe_activation,
         vocab_moe_train_quant_bits=args.vocab_moe_train_quant_bits,
+        vocab_moe_site_bias_enabled=args.vocab_moe_site_bias_enabled,
+        vocab_moe_site_scale_enabled=args.vocab_moe_site_scale_enabled,
+        vocab_moe_site_scale_init=args.vocab_moe_site_scale_init,
         smear_gate_enabled=args.smear_gate_enabled,
         smear_gate_width=args.smear_gate_width,
         smear_gate_mode=args.smear_gate_mode,
@@ -5401,6 +5457,9 @@ def main() -> None:
         f"resolved_input:{int(getattr(base_model, 'vocab_moe_input_enabled', False))} "
         f"resolved_layers:{','.join(str(v) for v in getattr(base_model, 'vocab_moe_layer_indices', ())) or 'none'} "
         f"scale_init:{args.vocab_moe_scale_init:g} "
+        f"site_bias:{int(args.vocab_moe_site_bias_enabled)} "
+        f"site_scale:{int(args.vocab_moe_site_scale_enabled)} "
+        f"site_scale_init:{args.vocab_moe_site_scale_init:g} "
         f"temperature:{args.vocab_moe_temperature:g} "
         f"activation:{args.vocab_moe_activation} "
         f"train_quant_bits:{args.vocab_moe_train_quant_bits}"
@@ -5572,6 +5631,7 @@ def main() -> None:
         f"quant_policy:default_bits={args.quant_weight_bits} "
         f"bits_overrides={args.quant_bits_overrides if args.quant_bits_overrides else 'none'} "
         f"int8_promote={','.join(args.quant_int8_promote_patterns) if args.quant_int8_promote_patterns else 'none'} "
+        f"force_quant={','.join(args.quant_force_patterns) if args.quant_force_patterns else 'none'} "
         f"ternary={','.join(args.quant_ternary_patterns) if args.quant_ternary_patterns else 'none'} "
         f"ternary_exclude={','.join(args.quant_ternary_exclude_patterns) if args.quant_ternary_exclude_patterns else 'none'} "
         f"ternary_group={args.quant_ternary_group_size} "
