@@ -27,19 +27,22 @@ The short current read:
 - Local sub-16 q6 proof baseline:
   `loopplain5k_i3l3r3_q6proof`, final export `1.7567` BPB,
   `9,268,177` bytes.
-- Active quality-first i4/l9/r5 update:
-  `records/sub4-quality-first-i4-5k-20260426-034039` is still running. The
-  best completed interim row is
-  `i4l9r5_d640e256_q16q8q8t_lqer_lidx_r8t16`, final export `2.4949` BPB,
-  `236.55ms/step`, `6,259,569` bytes. The wider
-  `i4l9r5_d768e320_q16q8q4t_lqer_lidx_r8t16` is close at `2.4962` BPB but
-  slower and larger.
+- Completed quality-first i4/l9/r5 update:
+  `records/sub4-quality-first-i4-5k-20260426-034039`. The best row was
+  `i4l9r5_d640e256_q16q8q4t_attncore1_lqer_lidx_r8t16`, final export
+  `2.4884` BPB, `267.67ms/step`, `6,050,853` bytes. This made "one full
+  attention block at the recurrent-core entry" the current best soft-size
+  quality lever.
 - Next prepared matrix group:
   `sub4_leader_levers` in `scripts/run_sub4_iotail_quant_matrix.py`, covering
   QK gain, scalar SmearGate, attention-output gates, sparse attention gates,
   Huber Muon decay, parallel residuals, frozen recurrent carry, score-first
   TTT, a conservative stacked public-style row, and prime loop-width l11/l13
   probes.
+- Newly prepared width-density group:
+  `sub4_width_ladder` in `scripts/run_sub4_iotail_quant_matrix.py`, covering
+  block-internal width ladders that keep the residual stream at the core width
+  while making high-precision IO-tail blocks internally narrower.
 
 ## How To Read This
 
@@ -113,6 +116,72 @@ Not yet implemented as drop-in local levers:
 - Full LoRA/phased TTT from the public transformer lane.
 - FLA/GatedDeltaNet and byte-level PPM mixture. These should be separate
   branches because they change the predictor class and review profile.
+
+## Layer Width / Data-Density Ladder
+
+Goal: keep information density from collapsing as the precision ladder moves
+from q16/q8/q4 into ternary, without forcing every high-precision outer block
+to pay the full core width.
+
+Knobs:
+
+- `LAYER_WIDTH_SCHEDULE`, one physical block width per HRC unique block, or one
+  per normal layer in baseline mode.
+- `MODEL_DIM` remains the residual-stream width and should be set to the
+  largest/core width.
+- Existing precision knobs still apply by block name:
+  `QUANT_BITS_OVERRIDES`, `QUANT_TERNARY_PATTERNS`, and `TRAIN_QUANT_FORWARD`.
+- runner group: `sub4_width_ladder` in
+  `scripts/run_sub4_iotail_quant_matrix.py`.
+
+Implementation:
+
+- The residual stream, skip path, tied output projection, loop-index controls,
+  pass embeddings, and recurrent controls stay at `MODEL_DIM`.
+- Blocks whose scheduled width is smaller than `MODEL_DIM` run through a
+  down-projection, an internal transformer block at the smaller width, then an
+  up-projected residual delta back into the full residual stream.
+- This means a q16 outer block can be narrower, while the q4/ternary inner
+  blocks can use the full width where each stored bit carries less precision.
+- The first version deliberately rejects VE, depth LoRA, and shared-basis XSA
+  with non-default widths. Those can be adapted later, but testing the core
+  width-density idea first keeps the path auditable.
+
+Why it might help:
+
+- It matches the intuition that effective capacity is roughly width times
+  precision, not width alone.
+- It may reduce wasted bytes in the precise IO tail while preserving or
+  improving low-precision core capacity.
+- It preserves HRC recurrence, mirrored IO tails, loop index, and existing
+  per-block quantization patterns.
+
+Cost/risk:
+
+- Each narrowed block pays two extra adapter matmuls, so the speed win is not
+  guaranteed. The win has to come from cheaper inner attention/MLP and smaller
+  quantized exported tensors.
+- Adapter projections add parameters; for very mild narrowing, they may eat the
+  savings.
+- Mirrored HRC blocks mirror the adapter weights too. That is consistent, but it
+  is a new behavior and should be compared against the same shape without a
+  width ladder.
+
+First queued candidates:
+
+- `i4l9r5_d640e256_q16q8q4t_wl320-480-560-640_attncore1_lqer_lidx_r8t16`
+- `i4l9r5_d640e256_q16q8q4t_wl400-480-560-640_attncore1_lqer_lidx_r8t16`
+- `i4l9r5_d640e256_q16q8q4t_wl480-560-640_attncore1_lqer_lidx_r8t16`
+- `i4l9r5_d640e256_q16q8q8t_wl320-480-560-640_attncore1_lqer_lidx_r8t16`
+- `i4l9r5_d768e320_q16q8q4t_wl384-576-672-768_attncore1_lqer_lidx_r8t16`
+- `i4l11r5_d640e256_q16q8q4t_wl320-480-560-640_attncore1_lqer_lidx_r8t16`
+- `i5l5r5_d512e192_q16q8q4q2t_wl256-320-384-448-512_attncore1_lqer_lidx_r6t12`
+
+Current read:
+
+- Implemented and smoke-tested on CPU forward/backward.
+- Not yet locally scored. The key comparison will be against the non-ladder
+  `attncore1` row at `2.4884` BPB.
 
 ## 16MB Vocabulary-MoE Lever
 

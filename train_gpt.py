@@ -185,6 +185,7 @@ class Hyperparameters:
     basis_share_group_size = int(os.environ.get("BASIS_SHARE_GROUP_SIZE", 3))
     basis_factorize_up = bool(int(os.environ.get("BASIS_FACTORIZE_UP", "1")))
     basis_factorize_down = bool(int(os.environ.get("BASIS_FACTORIZE_DOWN", "1")))
+    layer_width_schedule = os.environ.get("LAYER_WIDTH_SCHEDULE", "").strip()
     layer_mlp_mult_schedule = os.environ.get("LAYER_MLP_MULT_SCHEDULE", "").strip()
     layer_kv_heads_schedule = os.environ.get("LAYER_KV_HEADS_SCHEDULE", "").strip()
     strong_kv_sharing = bool(int(os.environ.get("STRONG_KV_SHARING", "0")))
@@ -2058,6 +2059,32 @@ def build_layer_mlp_mults(args: Hyperparameters) -> list[float]:
         if raw_mean > 0:
             raw = [m * (args.mlp_mult / raw_mean) for m in raw]
     return [max(0.5, m) for m in raw]
+def build_layer_widths(args: Hyperparameters) -> list[int]:
+    schedule_len = schedule_blocks(args)
+    if not args.layer_width_schedule:
+        return [int(args.model_dim)] * schedule_len
+    widths = parse_csv_int_list(args.layer_width_schedule, "LAYER_WIDTH_SCHEDULE")
+    if len(widths) != schedule_len:
+        raise ValueError(
+            f"LAYER_WIDTH_SCHEDULE length must match "
+            f"{'NUM_UNIQUE_BLOCKS' if args.model_family == 'hrc' else 'NUM_LAYERS'}={schedule_len}, got {len(widths)}"
+        )
+    out: list[int] = []
+    for idx, width in enumerate(widths):
+        width = int(width)
+        if width <= 0:
+            raise ValueError(f"LAYER_WIDTH_SCHEDULE entries must be positive, got {width} at index {idx}")
+        if width > args.model_dim:
+            raise ValueError(
+                f"LAYER_WIDTH_SCHEDULE entry {width} at index {idx} exceeds MODEL_DIM={args.model_dim}; "
+                "set MODEL_DIM to the largest residual/core width"
+            )
+        if width % 8 != 0:
+            raise ValueError(
+                f"LAYER_WIDTH_SCHEDULE entries must be multiples of 8 for Tensor Core-friendly shapes, got {width}"
+            )
+        out.append(width)
+    return out
 def build_layer_kv_heads(args: Hyperparameters) -> list[int]:
     schedule_len = schedule_blocks(args)
     if args.layer_kv_heads_schedule:
@@ -3572,6 +3599,62 @@ class Block(nn.Module):
             if mlp_branch is not None:
                 x = x + mlp_branch
         return x
+class WidthAdaptedBlock(nn.Module):
+    """Run a block at a smaller internal width while preserving the residual width."""
+
+    def __init__(self, outer_dim: int, inner_dim: int, block: Block):
+        super().__init__()
+        self.outer_dim = int(outer_dim)
+        self.inner_dim = int(inner_dim)
+        self.block = block
+        self.width_adapted = self.inner_dim != self.outer_dim
+        self.in_proj = (
+            CastedLinear(self.outer_dim, self.inner_dim, bias=False) if self.width_adapted else None
+        )
+        self.out_proj = (
+            CastedLinear(self.inner_dim, self.outer_dim, bias=False) if self.width_adapted else None
+        )
+
+    def forward(
+        self,
+        x: Tensor,
+        x0: Tensor,
+        v_embed: Tensor | None = None,
+        q_delta: Tensor | None = None,
+        v_delta: Tensor | None = None,
+        q_role_scale: Tensor | None = None,
+        v_role_scale: Tensor | None = None,
+        mirror_mode: int = 0,
+        use_xsa_override: bool | None = None,
+        use_qsparse_override: bool | None = None,
+    ) -> Tensor:
+        if not self.width_adapted:
+            return self.block(
+                x,
+                x0,
+                v_embed=v_embed,
+                q_delta=q_delta,
+                v_delta=v_delta,
+                q_role_scale=q_role_scale,
+                v_role_scale=v_role_scale,
+                mirror_mode=mirror_mode,
+                use_xsa_override=use_xsa_override,
+                use_qsparse_override=use_qsparse_override,
+            )
+        if v_embed is not None or q_delta is not None or v_delta is not None:
+            raise RuntimeError("width-adapted blocks currently require VE and depth LoRA to be disabled")
+        if self.in_proj is None or self.out_proj is None:
+            raise RuntimeError("width-adapted block projections are missing")
+        inner_x = self.in_proj(x, mirror_mode=mirror_mode)
+        inner_x0 = self.in_proj(x0, mirror_mode=mirror_mode)
+        inner_y = self.block(
+            inner_x,
+            inner_x0,
+            mirror_mode=mirror_mode,
+            use_xsa_override=use_xsa_override,
+            use_qsparse_override=use_qsparse_override,
+        )
+        return x + self.out_proj(inner_y - inner_x, mirror_mode=mirror_mode)
 class DepthLoRA(nn.Module):
     def __init__(self, dim: int, kv_dim: int, rank: int):
         super().__init__()
@@ -3703,6 +3786,7 @@ class GPT(nn.Module):
         qsparse_layer_flags: list[bool] | None = None,
         xsa_gate_layer_flags: list[bool] | None = None,
         xsa_gate_init: float = 2.0,
+        layer_widths: list[int] | None = None,
         basis_xsa_enabled: bool = False,
         basis_rank: int = 128,
         basis_share_group_size: int = 3,
@@ -3821,6 +3905,7 @@ class GPT(nn.Module):
         self.num_skip_weights = min(self.num_encoder_layers, self.num_decoder_layers)
         self.skip_weights = nn.Parameter(torch.ones(self.num_skip_weights, model_dim, dtype=torch.float32))
         schedule_len = num_unique_blocks if self.is_hrc else num_layers
+        layer_widths = [model_dim] * schedule_len if layer_widths is None else layer_widths
         layer_mlp_mults = [mlp_mult] * schedule_len if layer_mlp_mults is None else layer_mlp_mults
         parallel_residual_flags = [False] * schedule_len if parallel_residual_flags is None else parallel_residual_flags
         layer_kv_heads = [num_kv_heads] * schedule_len if layer_kv_heads is None else layer_kv_heads
@@ -3830,6 +3915,8 @@ class GPT(nn.Module):
         depth_scale_init_values = [1.0] * schedule_len if depth_scale_init_values is None else depth_scale_init_values
         if len(layer_mlp_mults) != schedule_len:
             raise ValueError(f"layer_mlp_mults must have {schedule_len} entries, got {len(layer_mlp_mults)}")
+        if len(layer_widths) != schedule_len:
+            raise ValueError(f"layer_widths must have {schedule_len} entries, got {len(layer_widths)}")
         if len(parallel_residual_flags) != schedule_len:
             raise ValueError(
                 f"parallel_residual_flags must have {schedule_len} entries, got {len(parallel_residual_flags)}"
@@ -3846,12 +3933,34 @@ class GPT(nn.Module):
             raise ValueError(
                 f"depth_scale_init_values must have {schedule_len} entries, got {len(depth_scale_init_values)}"
             )
+        self.layer_widths = tuple(int(width) for width in layer_widths)
+        for block_idx, width in enumerate(self.layer_widths):
+            if width <= 0 or width > model_dim:
+                raise ValueError(
+                    f"layer_widths[{block_idx}] must be in [1, MODEL_DIM={model_dim}], got {width}"
+                )
+            if width % num_heads != 0:
+                raise ValueError(
+                    f"layer_widths[{block_idx}]={width} must be divisible by NUM_HEADS={num_heads}"
+                )
+            if (width // num_heads) % 8 != 0:
+                raise ValueError(
+                    f"layer_widths[{block_idx}]={width} gives head_dim={width // num_heads}; "
+                    "use a multiple of 8 for efficient attention"
+                )
+        self.width_ladder_enabled = any(width != model_dim for width in self.layer_widths)
+        if self.width_ladder_enabled and basis_xsa_enabled:
+            raise ValueError("LAYER_WIDTH_SCHEDULE with non-default widths currently requires BASIS_XSA_ENABLED=0")
+        if self.width_ladder_enabled and depth_lora_rank > 0:
+            raise ValueError("LAYER_WIDTH_SCHEDULE with non-default widths currently requires DEPTH_LORA_RANK=0")
+        if self.width_ladder_enabled and ve_enabled:
+            raise ValueError("LAYER_WIDTH_SCHEDULE with non-default widths currently requires VE_ENABLED=0")
         self.xsa_layer_flags = tuple(bool(flag) for flag in xsa_layer_flags)
         self.qsparse_layer_flags = tuple(bool(flag) for flag in qsparse_layer_flags)
         self.parallel_residual_flags = tuple(bool(flag) for flag in parallel_residual_flags)
         self.layer_hidden_dims = [
-            max(8, int(round((model_dim * float(mult)) / 8.0) * 8))
-            for mult in layer_mlp_mults
+            max(8, int(round((int(width) * float(mult)) / 8.0) * 8))
+            for width, mult in zip(self.layer_widths, layer_mlp_mults)
         ]
         self.block_schedule: tuple[int, ...] = tuple(range(total_layers))
         self.block_repeat_schedule: tuple[int, ...] = tuple(0 for _ in range(total_layers))
@@ -3914,7 +4023,7 @@ class GPT(nn.Module):
                 self.ve_shared = ValueEmbedding(vocab_size, ve_dim, kv_dim)
                 self.ve_layer_scales = nn.Parameter(torch.ones((len(self.ve_layer_indices),), dtype=torch.float32))
                 self.ve_layer_index_to_scale = {layer_idx: i for i, layer_idx in enumerate(self.ve_layer_indices)}
-        blocks: list[Block] = []
+        blocks: list[nn.Module] = []
         if self.is_hrc:
             route_metadata = build_hrc_route_package(
                 effective_depth=effective_depth,
@@ -3996,14 +4105,14 @@ class GPT(nn.Module):
                 if xsa_layer_flags[layer_idx] and xsa_gate_layer_flags[layer_idx]:
                     shared_xsa_gate[block_idx] = True
             for block_idx in range(num_unique_blocks):
+                block_dim = self.layer_widths[block_idx]
                 shared_basis = (
                     self.shared_mlp_bases[block_idx // self._basis_share_group_size]
                     if len(self.shared_mlp_bases) > 0
                     else None
                 )
-                blocks.append(
-                    Block(
-                        model_dim,
+                block = Block(
+                        block_dim,
                         num_heads,
                         layer_kv_heads[block_idx],
                         self.layer_hidden_dims[block_idx],
@@ -4039,8 +4148,8 @@ class GPT(nn.Module):
                         ternary_scale_stat=train_ternary_scale_stat,
                         fused_qkv_enabled=train_fused_qkv,
                         bitnet_v2_hadamard=bitnet_v2_hadamard,
-                    )
                 )
+                blocks.append(WidthAdaptedBlock(model_dim, block_dim, block) if block_dim != model_dim else block)
             self.depth_adapter_schedule = tuple(
                 build_layer_tie_schedule(total_layers, hrc_depth_adapter_tie_mode, list(self.block_schedule))
             )
@@ -4190,14 +4299,14 @@ class GPT(nn.Module):
                 )
         else:
             for layer_idx in range(num_layers):
+                block_dim = self.layer_widths[layer_idx]
                 shared_basis = (
                     self.shared_mlp_bases[layer_idx // self._basis_share_group_size]
                     if len(self.shared_mlp_bases) > 0
                     else None
                 )
-                blocks.append(
-                    Block(
-                        model_dim,
+                block = Block(
+                        block_dim,
                         num_heads,
                         layer_kv_heads[layer_idx],
                         self.layer_hidden_dims[layer_idx],
@@ -4231,8 +4340,8 @@ class GPT(nn.Module):
                         ternary_scale_stat=train_ternary_scale_stat,
                         fused_qkv_enabled=train_fused_qkv,
                         bitnet_v2_hadamard=bitnet_v2_hadamard,
-                    )
                 )
+                blocks.append(WidthAdaptedBlock(model_dim, block_dim, block) if block_dim != model_dim else block)
         if self.vocab_moe is not None:
             input_enabled, layer_indices = parse_vocab_moe_layers(
                 vocab_moe_layers,
@@ -5079,6 +5188,7 @@ def main() -> None:
     # -----------------------------
     # MODEL + OPTIMIZER SETUP
     # -----------------------------
+    layer_widths = build_layer_widths(args)
     layer_mlp_mults = build_layer_mlp_mults(args)
     layer_kv_heads = build_layer_kv_heads(args)
     parallel_residual_flags = build_parallel_residual_flags(args)
@@ -5202,6 +5312,7 @@ def main() -> None:
         qsparse_layer_flags=qsparse_layer_flags,
         xsa_gate_layer_flags=xsa_gate_layer_flags,
         xsa_gate_init=args.xsa_gate_init,
+        layer_widths=layer_widths,
         basis_xsa_enabled=args.basis_xsa_enabled,
         basis_rank=args.basis_rank,
         basis_share_group_size=args.basis_share_group_size,
@@ -5418,6 +5529,10 @@ def main() -> None:
     log0(
         f"layer_kv_heads_schedule:{','.join(str(v) for v in layer_kv_heads)} "
         f"strong_kv_sharing:{args.strong_kv_sharing}"
+    )
+    log0(
+        f"layer_width_schedule:{','.join(str(v) for v in layer_widths)} "
+        f"width_ladder_enabled:{int(any(v != args.model_dim for v in layer_widths))}"
     )
     log0(
         f"layer_mlp_mult_schedule:{','.join(f'{v:.3f}' for v in layer_mlp_mults)} "

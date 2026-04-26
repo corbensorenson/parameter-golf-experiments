@@ -1260,10 +1260,82 @@ LEADER_LEVER_CANDIDATES: list[dict[str, Any]] = [
     ),
 ]
 
+WIDTH_LADDER_CANDIDATES: list[dict[str, Any]] = [
+    quality_i4_candidate(
+        "i4l9r5_d640e256_q16q8q4t_wl320-480-560-640_attncore1_lqer_lidx_r8t16",
+        model_dim=640,
+        embed_dim=256,
+        attention_mode="first",
+        extra_env={"LAYER_WIDTH_SCHEDULE": "320,480,560,640,640,640,640,640,640,640,640,640,640"},
+    ),
+    quality_i4_candidate(
+        "i4l9r5_d640e256_q16q8q4t_wl400-480-560-640_attncore1_lqer_lidx_r8t16",
+        model_dim=640,
+        embed_dim=256,
+        attention_mode="first",
+        extra_env={"LAYER_WIDTH_SCHEDULE": "400,480,560,640,640,640,640,640,640,640,640,640,640"},
+    ),
+    quality_i4_candidate(
+        "i4l9r5_d640e256_q16q8q4t_wl480-560-640_attncore1_lqer_lidx_r8t16",
+        model_dim=640,
+        embed_dim=256,
+        attention_mode="first",
+        extra_env={"LAYER_WIDTH_SCHEDULE": "480,560,640,640,640,640,640,640,640,640,640,640,640"},
+    ),
+    quality_i4_candidate(
+        "i4l9r5_d640e256_q16q8q8t_wl320-480-560-640_attncore1_lqer_lidx_r8t16",
+        model_dim=640,
+        embed_dim=256,
+        io_quant=(16, 8, 8),
+        attention_mode="first",
+        extra_env={"LAYER_WIDTH_SCHEDULE": "320,480,560,640,640,640,640,640,640,640,640,640,640"},
+    ),
+    quality_i4_candidate(
+        "i4l9r5_d768e320_q16q8q4t_wl384-576-672-768_attncore1_lqer_lidx_r8t16",
+        model_dim=768,
+        embed_dim=320,
+        attention_mode="first",
+        extra_env={"LAYER_WIDTH_SCHEDULE": "384,576,672,768,768,768,768,768,768,768,768,768,768"},
+    ),
+    quality_i4_candidate(
+        "i4l11r5_d640e256_q16q8q4t_wl320-480-560-640_attncore1_lqer_lidx_r8t16",
+        model_dim=640,
+        embed_dim=256,
+        loop_width=11,
+        attention_mode="first",
+        extra_env={"LAYER_WIDTH_SCHEDULE": "320,480,560,640,640,640,640,640,640,640,640,640,640,640,640"},
+    ),
+    {
+        "name": "i5l5r5_d512e192_q16q8q4q2t_wl256-320-384-448-512_attncore1_lqer_lidx_r6t12",
+        "base_profile": "i1l2r2_d512_e128_h8kv1_mlpinner_mlp075",
+        "preset": "2060sprint_micro_muon_cooltaper5k_cold_tokens8k",
+        "env": {
+            **route_env(
+                io_width=5,
+                loop_width=5,
+                repeats=5,
+                model_dim=512,
+                embed_dim=192,
+                heads=8,
+                mlp_mult=0.5,
+                io_quant=(16, 8, 4, 2),
+                ternary_start=4,
+                mlp_only_start=5,
+            ),
+            **lqer_env(rank=6, top_k=12),
+            **loop_index_env(dim=32, scale_init=0.03),
+            "HRC_MLP_ONLY_BLOCKS": "6,7,8,9",
+            "LAYER_WIDTH_SCHEDULE": "256,320,384,448,512,512,512,512,512,512",
+        },
+    },
+]
+
 CANDIDATES.extend(LEADER_LEVER_CANDIDATES)
+CANDIDATES.extend(WIDTH_LADDER_CANDIDATES)
 
 CANDIDATE_GROUPS: dict[str, list[str]] = {
     "sub4_leader_levers": [candidate["name"] for candidate in LEADER_LEVER_CANDIDATES],
+    "sub4_width_ladder": [candidate["name"] for candidate in WIDTH_LADDER_CANDIDATES],
 }
 
 
