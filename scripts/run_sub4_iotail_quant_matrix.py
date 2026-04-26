@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import csv
 import re
+import subprocess
 import time
 from pathlib import Path
 from typing import Any
@@ -361,6 +362,76 @@ def selected_candidates(raw: str) -> list[dict[str, Any]]:
     return out
 
 
+def read_gpu_status() -> tuple[int, int] | None:
+    try:
+        proc = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=utilization.gpu,memory.used",
+                "--format=csv,noheader,nounits",
+            ],
+            cwd=ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        return None
+    line = proc.stdout.strip().splitlines()[0] if proc.stdout.strip() else ""
+    parts = [part.strip() for part in line.split(",")]
+    if len(parts) < 2:
+        return None
+    try:
+        return int(parts[0]), int(parts[1])
+    except ValueError:
+        return None
+
+
+def wait_for_idle_gpu(
+    *,
+    enabled: bool,
+    max_util: int,
+    max_memory_mib: int,
+    quiet_seconds: int,
+    poll_seconds: int,
+    label: str,
+) -> float:
+    if not enabled:
+        return 0.0
+    started = time.perf_counter()
+    quiet_started: float | None = None
+    while True:
+        status = read_gpu_status()
+        if status is None:
+            print("idle_gpu status unavailable; continuing without wait", flush=True)
+            return round(time.perf_counter() - started, 3)
+        util, memory_mib = status
+        memory_ok = max_memory_mib <= 0 or memory_mib <= max_memory_mib
+        idle = util <= max_util and memory_ok
+        if idle:
+            if quiet_started is None:
+                quiet_started = time.perf_counter()
+            if time.perf_counter() - quiet_started >= quiet_seconds:
+                waited = round(time.perf_counter() - started, 3)
+                print(
+                    f"idle_gpu ready {label}: waited={waited}s util={util}% mem={memory_mib}MiB",
+                    flush=True,
+                )
+                return waited
+        else:
+            quiet_started = None
+            print(
+                f"idle_gpu waiting {label}: util={util}% mem={memory_mib}MiB "
+                f"threshold={max_util}%/{max_memory_mib}MiB",
+                flush=True,
+            )
+        time.sleep(max(1, poll_seconds))
+
+
 def run_matrix(
     *,
     out_dir: Path,
@@ -374,10 +445,23 @@ def run_matrix(
     train_quant_forward: bool,
     quant_train_every: int,
     roundtrip_guard: bool,
+    wait_for_idle: bool,
+    idle_max_util: int,
+    idle_max_memory_mib: int,
+    idle_seconds: int,
+    idle_poll_seconds: int,
 ) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     for candidate in candidates:
         name = str(candidate["name"])
+        idle_wait_s = wait_for_idle_gpu(
+            enabled=wait_for_idle,
+            max_util=idle_max_util,
+            max_memory_mib=idle_max_memory_mib,
+            quiet_seconds=idle_seconds,
+            poll_seconds=idle_poll_seconds,
+            label=name,
+        )
         run_id = f"iotail_quant_{name}_{iterations}"
         env = configure_env()
         env.update(COMMON_ENV)
@@ -414,6 +498,7 @@ def run_matrix(
             "train_quant_forward": int(train_quant_forward),
             "quant_train_every": quant_train_every,
             "roundtrip_guard": int(roundtrip_guard),
+            "idle_wait_s": idle_wait_s,
             "returncode": proc.returncode,
             "elapsed_s": round(time.perf_counter() - started, 3),
             "raw_log": raw_path.name,
@@ -501,6 +586,11 @@ def main() -> int:
     parser.add_argument("--train-quant-forward", action="store_true")
     parser.add_argument("--roundtrip-guard", action="store_true")
     parser.add_argument("--quant-train-every", type=int, default=100)
+    parser.add_argument("--wait-for-idle-gpu", action="store_true")
+    parser.add_argument("--idle-max-util", type=int, default=15)
+    parser.add_argument("--idle-max-memory-mib", type=int, default=2500)
+    parser.add_argument("--idle-seconds", type=int, default=20)
+    parser.add_argument("--idle-poll-seconds", type=int, default=5)
     parser.add_argument("--list", action="store_true")
     args = parser.parse_args()
 
@@ -524,6 +614,11 @@ def main() -> int:
         train_quant_forward=args.train_quant_forward,
         quant_train_every=args.quant_train_every,
         roundtrip_guard=args.roundtrip_guard,
+        wait_for_idle=args.wait_for_idle_gpu,
+        idle_max_util=args.idle_max_util,
+        idle_max_memory_mib=args.idle_max_memory_mib,
+        idle_seconds=args.idle_seconds,
+        idle_poll_seconds=args.idle_poll_seconds,
     )
     write_summary(out_dir, rows)
     print(out_dir)

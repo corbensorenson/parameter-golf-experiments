@@ -440,3 +440,30 @@ Active corrected 10-minute wall-clock matrix:
   `train_quant_forward:1`, `train_quant_linear_count:6`,
   `train_quant_ternary_count:4`, `quant_train_mode:none`,
   `max_wallclock_seconds:600`.
+
+Completion update:
+
+- The machine was also used for games during this sweep. Treat wall-clock
+  ranking and step counts as contaminated; quality/export success is still
+  useful, but fair speed claims need an idle rerun.
+- Completed rows:
+  - `i3l3r2_d768e256_q864_coret_lqer`: best local quality in this sweep,
+    `2.5572` final BPB, `3,527,629` bytes, `472,371` headroom,
+    `3347` wallclock-stop steps.
+  - `i3l3r3_d768e256_q884_coret_lqer`: `2.6543` final BPB,
+    `3,993,505` bytes, only `6,495` headroom, `2902` wallclock-stop steps.
+  - `i1l2r2_d768e256_q8_coret_lqer`: `3.8918` final BPB,
+    `2,955,769` bytes, `1,044,231` headroom.
+  - `i1l2r2_d896e256_q8_coret_lqer`: `3.9234` final BPB,
+    `3,033,977` bytes, `966,023` headroom.
+- Failed rows:
+  - `i3l3r3_d768e256_q864_coret_lqer`: timeout after 900s.
+  - `i3l3r3_d768e256_q886_coret_lqer`: CUDA illegal memory access during the
+    q8/q8/q6 train-time fake-quant forward path.
+- Read: the serious follow-up is an idle rerun of
+  `i3l3r2_d768e256_q864_coret_lqer` and `i3l3r3_d768e256_q884_coret_lqer`,
+  plus a shorter debug repro of q886 with `CUDA_LAUNCH_BLOCKING=1`.
+- Runner support: `scripts/run_sub4_iotail_quant_matrix.py` now has
+  `--wait-for-idle-gpu`, `--idle-max-util`, `--idle-max-memory-mib`,
+  `--idle-seconds`, and `--idle-poll-seconds` so future wall-clock sweeps can
+  avoid starting candidates while the GPU is busy.
