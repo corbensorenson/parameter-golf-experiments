@@ -114,6 +114,60 @@ Not yet implemented as drop-in local levers:
 - FLA/GatedDeltaNet and byte-level PPM mixture. These should be separate
   branches because they change the predictor class and review profile.
 
+## 16MB Vocabulary-MoE Lever
+
+Goal: spend some of the official 16MB budget on token-conditioned computation
+without paying for one literal micro-network per token.
+
+Knobs:
+
+- `VOCAB_MOE_ENABLED=1`
+- `VOCAB_MOE_EXPERTS`, usually `16` or `32`
+- `VOCAB_MOE_RANK`, usually `1` or `2` locally
+- `VOCAB_MOE_MODE=static|hybrid|hidden`
+- `VOCAB_MOE_LAYERS=input|loop_first|loop_every3|...`
+- `VOCAB_MOE_TRAIN_QUANT_BITS=6`
+- runner: `scripts/run_16mb_vocab_moe_matrix.py`
+
+Design:
+
+- Each token gets a tiny learned router prior (`vocab_size x experts`).
+- The actual experts are shared low-rank bases (`experts x dim x rank` and
+  `experts x rank x dim`), mixed with a softmax router.
+- `static` is token-prior only. `hybrid` adds a hidden-state router. `hidden`
+  is a pure hidden-state router control.
+- The adapter can run at the embedding, selected virtual layers, or HRC loop
+  aliases such as `loop_first` and `loop_every3`.
+
+Why this is in the 16MB lane:
+
+- It is too expensive and too speculative for the sub-4MB family right now.
+- In the 16MB lane, it is a clean way to buy token-specialized behavior while
+  keeping matmuls batched and GPU-friendly.
+- The matrix trains the VocabMoE expert weights and token priors with fake q6
+  from the start (`VOCAB_MOE_TRAIN_QUANT_BITS=6`) and keeps final artifact
+  round-trip enabled, so the score is the exported model rather than a
+  full-precision training-only proxy.
+
+Queued local probes:
+
+- `i3l3r3_d640e256_q6_publicstack_control`
+- `i3l3r3_d640e256_q6_vocabmoe_static_k16r2_input`
+- `i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_loopfirst`
+- `i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_input_loopfirst`
+- `i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_loopevery3`
+- `i3l3r3_d640e256_q6_vocabmoe_hybrid_k32r1_loopfirst`
+- `i4l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_loopfirst`
+
+Current read:
+
+- Unknown until the queued matrix completes.
+- The control row is included so we can attribute wins to VocabMoE rather than
+  the public-stack/larger-width scaffold.
+- If `loop_first` wins, the idea is likely acting as a token-conditioned repair
+  for the recurrent middle. If `input` wins, it is closer to a learned
+  vocabulary-feature embedding.
+
 ## Measurement And Legality Levers
 
 ### Final Artifact Round-Trip

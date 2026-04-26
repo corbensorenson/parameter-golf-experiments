@@ -28,6 +28,9 @@ train-time quantization, and careful byte spending:
   under 4MB, so the sub-4 family uses lower-rank embedding factors.
 - **LQER sidecars.** Low-rank quantization-error residuals recover some quality
   after aggressive quantization while staying inside the artifact cap.
+- **16MB vocabulary MoE probes.** The official-size lane can spend bytes on a
+  token-conditioned low-rank expert adapter: each token learns a tiny router
+  prior, while shared expert bases keep the CUDA work batched.
 - **Lossless tokenizer probes.** CaseOps and word-boundary-aware tokenizer
   experiments are tracked separately from architecture changes so byte
   accounting stays auditable.
@@ -41,6 +44,7 @@ train-time quantization, and careful byte spending:
 | Precision-ladder IO tail | q16/q8/q4/q2/ternary entry and mirrored exit from the first training step | Legal and fast; best row `2.9888` BPB, so d512/e192 is under-capacity |
 | Loop-index recurrence | Whether the looped middle benefits from virtual-position information | Helps r9 and i5/l5, hurts q884 r3; do not enable blindly |
 | Sub-16MB transfer lane | Ports useful sub-4 speed and quality levers into a less byte-starved model | Local q6 proof baseline: `1.7567` final BPB, `9.27MB` artifact |
+| 16MB Vocab-MoE lane | Token-conditioned shared low-rank experts on top of the q6 HRC/CaseOps stack | Implemented; first 5k matrix queued after the active sub-4 run |
 | Tokenizer lane | Lossless CaseOps, word-boundary BPE/Unigram, vocab sweeps | Legal path is exact byte sidecars and reversible transforms, not lossy whole-word shortcuts |
 
 These are local proxy numbers, not official leaderboard submissions. The
@@ -59,6 +63,8 @@ priorities, not claim final scores.
   matrix, including wall-clock and final-artifact modes.
 - `scripts/run_sub4_caseops_wide_matrix.py` - wide/shallow CaseOps candidate
   matrix.
+- `scripts/run_16mb_vocab_moe_matrix.py` - 16MB Vocab-MoE control/probe
+  matrix with final artifact round-trip enabled.
 - `scripts/bench_packed_ternary_linear.py` - benchmark harness for packed
   ternary linear experiments.
 - `scripts/check_cuda126_env.py` and `scripts/use_cuda126.ps1` - local CUDA
@@ -124,6 +130,12 @@ python scripts/run_sub4_caseops_wide_matrix.py \
   --final-artifacts
 ```
 
+Run the 16MB Vocab-MoE matrix:
+
+```bash
+python scripts/run_16mb_vocab_moe_matrix.py --wait-for-idle-gpu
+```
+
 Probe packed ternary linear speed:
 
 ```bash
@@ -140,6 +152,12 @@ python scripts/bench_packed_ternary_linear.py
 - `HRC_LOOP_INDEX_ENABLED=1` - tells the recurrent middle where it is in the
   loop.
 - `HRC_FROZEN_CARRY_ENABLED=1` - tests a cheap recurrent carry route.
+- `VOCAB_MOE_ENABLED=1` - enables token-conditioned shared low-rank experts in
+  the 16MB lane.
+- `VOCAB_MOE_LAYERS=input,loop_first` - places the adapter at embeddings and/or
+  selected virtual HRC layers.
+- `VOCAB_MOE_TRAIN_QUANT_BITS=6` - trains the Vocab-MoE adapter against a q6
+  forward view from the first step.
 - `TRAIN_FUSED_QKV=1`, `USE_GRAD_SCALER=0`, `MUON_DTYPE=fp16` - speed probes
   carried from sub-4 into sub-16.
 
