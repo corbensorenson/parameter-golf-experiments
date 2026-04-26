@@ -490,6 +490,43 @@ CANDIDATES: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "i3l3r9_d768e256_q884_coret_lqer_r6t12",
+        "base_profile": "i1l2r2_d768_e256_h12kv1_mlpinner_mlp075",
+        "preset": "2060sprint_micro_muon_cooltaper5k_cold_tokens8k",
+        "env": {
+            **route_env(
+                io_width=3,
+                loop_width=3,
+                repeats=9,
+                model_dim=768,
+                embed_dim=256,
+                heads=12,
+                mlp_mult=0.75,
+                io_quant=(8, 8, 4),
+            ),
+            **lqer_env(rank=6, top_k=12),
+        },
+    },
+    {
+        "name": "i3l3r9_d768e256_q884_coret_lqer_lidx_r6t12",
+        "base_profile": "i1l2r2_d768_e256_h12kv1_mlpinner_mlp075",
+        "preset": "2060sprint_micro_muon_cooltaper5k_cold_tokens8k",
+        "env": {
+            **route_env(
+                io_width=3,
+                loop_width=3,
+                repeats=9,
+                model_dim=768,
+                embed_dim=256,
+                heads=12,
+                mlp_mult=0.75,
+                io_quant=(8, 8, 4),
+            ),
+            **lqer_env(rank=6, top_k=12),
+            **loop_index_env(dim=32, scale_init=0.03),
+        },
+    },
+    {
         "name": "i5l5r1_d512e192_q16q8q4q2t_coret_lqer_r6t12",
         "base_profile": "i1l2r2_d512_e128_h8kv1_mlpinner_mlp075",
         "preset": "2060sprint_micro_muon_cooltaper5k_cold_tokens8k",

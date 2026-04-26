@@ -740,3 +740,32 @@ Startup update:
   `ternary=blocks.4.,blocks.5.,blocks.6.,blocks.7.,blocks.8.,blocks.9.`.
 - Startup route is correct for r1:
   `0,1,2,3,4,5,6,7,8,9,4,3,2,1,0`.
+- First row completed:
+  `i5l5r1_d512e192_q16q8q4q2t_coret_lqer_r6t12` reached final export
+  `3.1548` BPB at `5128` wallclock-stop steps, `117.03ms/step`, and
+  `3,885,607` total bytes. It is fast and legal, but quality is far behind
+  the d768 q884 r3 row.
+
+## i3/l3/r9 Loop-Index Test
+
+Follow-up idea: the r3 q884 loop may not repeat enough times for a tiny loop
+position embedding to matter. Add a deeper repeated-middle pair that keeps the
+same six physical blocks and same q884/LQER byte budget, but spends much more
+compute on the tied ternary core:
+
+- no loop index: `i3l3r9_d768e256_q884_coret_lqer_r6t12`
+- loop index: `i3l3r9_d768e256_q884_coret_lqer_lidx_r6t12`
+
+Expected route:
+
+- `0,1,2,3,4,5,3,4,5,3,4,5,3,4,5,3,4,5,3,4,5,3,4,5,3,4,5,3,4,5,2,1,0`
+
+This is an effective depth of `33` virtual blocks from only `6` physical HRC
+blocks. It should isolate the actual question: does loop index conditioning
+help when the recursive core has enough repeated applications to otherwise lose
+track of where it is?
+
+Validation:
+
+- `py_compile` passed after adding both r9 candidates.
+- `--list` shows both r9 rows.
