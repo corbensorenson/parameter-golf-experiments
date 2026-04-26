@@ -75,11 +75,12 @@ COMMON_ENV = {
     "TRAIN_CASTED_LINEAR_PARAM_DTYPE": "model",
     # The runner can additionally enable TRAIN_QUANT_FORWARD=1, which makes
     # CastedLinear use q8/q6/q4/ternary STE views from the first forward pass.
-    # Roundtrip projection remains as a guardrail for exact export alignment.
+    # Keep the old export/reload roundtrip projection opt-in only: it is useful
+    # as a guardrail, but it is too slow and invasive for wall-clock sweeps.
     "TRAIN_TERNARY_BLOCKS": "0",
-    "QUANT_TRAIN_MODE": "roundtrip",
+    "QUANT_TRAIN_MODE": "none",
     "QUANT_TRAIN_START_FRACTION": "0.0",
-    "QUANT_TRAIN_EVERY": "100",
+    "QUANT_TRAIN_EVERY": "1",
     "QUANT_TERNARY_GROUP_SIZE": "128",
     "QUANT_TERNARY_SCALE_STAT": "mean",
     "QUANT_TERNARY_SHRINKAGE_FIX": "1",
@@ -372,6 +373,7 @@ def run_matrix(
     final_artifacts: bool,
     train_quant_forward: bool,
     quant_train_every: int,
+    roundtrip_guard: bool,
 ) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     for candidate in candidates:
@@ -390,6 +392,7 @@ def run_matrix(
                 "RUN_ID": run_id,
                 "MAX_WALLCLOCK_SECONDS": str(wallclock_seconds),
                 "TRAIN_QUANT_FORWARD": "1" if train_quant_forward else "0",
+                "QUANT_TRAIN_MODE": "roundtrip" if roundtrip_guard else "none",
                 "QUANT_TRAIN_EVERY": str(quant_train_every),
                 "SKIP_FINAL_ARTIFACTS": "0" if final_artifacts else "1",
                 "PYTHONUNBUFFERED": "1",
@@ -410,6 +413,7 @@ def run_matrix(
             "final_artifacts": int(final_artifacts),
             "train_quant_forward": int(train_quant_forward),
             "quant_train_every": quant_train_every,
+            "roundtrip_guard": int(roundtrip_guard),
             "returncode": proc.returncode,
             "elapsed_s": round(time.perf_counter() - started, 3),
             "raw_log": raw_path.name,
@@ -495,6 +499,7 @@ def main() -> int:
     parser.add_argument("--candidates", default="")
     parser.add_argument("--final-artifacts", action="store_true")
     parser.add_argument("--train-quant-forward", action="store_true")
+    parser.add_argument("--roundtrip-guard", action="store_true")
     parser.add_argument("--quant-train-every", type=int, default=100)
     parser.add_argument("--list", action="store_true")
     args = parser.parse_args()
@@ -518,6 +523,7 @@ def main() -> int:
         final_artifacts=args.final_artifacts,
         train_quant_forward=args.train_quant_forward,
         quant_train_every=args.quant_train_every,
+        roundtrip_guard=args.roundtrip_guard,
     )
     write_summary(out_dir, rows)
     print(out_dir)
