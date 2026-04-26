@@ -1,0 +1,1654 @@
+# Project Levers
+
+Date: 2026-04-26
+
+This is the working lever catalog for the Parameter Golf experiments in this
+repo. It is meant to answer: "What knobs can we pull, what do they buy us, what
+do they cost, and what have we already learned?"
+
+The short current read:
+
+- Best clean legal sub-4MB local row:
+  `i3l3r3_d768e256_q884_coret_lqer_r6t12`, final export `2.5749` BPB,
+  `148.36ms/step`, `3,967,875` bytes.
+- Best soft-cap sub-4MB quality row:
+  `i3l3r3_d768e256_q884_coret_lqer_r6`, final export `2.5505` BPB,
+  `4,035,469` bytes, about `35KB` over the decimal 4MB goal.
+- Best i5/l5 precision ladder row so far:
+  `i5l5r2_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12`, final export
+  `2.9888` BPB, `124.29ms/step`.
+- Local sub-16 q6 proof baseline:
+  `loopplain5k_i3l3r3_q6proof`, final export `1.7567` BPB,
+  `9,268,177` bytes.
+
+## How To Read This
+
+Each lever has:
+
+- Goal: mainly quality, speed, artifact size, legality, or measurement.
+- Knobs: env vars, candidate names, scripts, or profile fields.
+- Upside: why we would pull it.
+- Cost/risk: what it can break or slow down.
+- Current read: what the local experiments suggest so far.
+
+Use the current promoted rows as anchors. A lever is only promoted if it wins
+under final artifact round-trip, not only train-time loss.
+
+## Measurement And Legality Levers
+
+### Final Artifact Round-Trip
+
+Goal: measurement correctness.
+
+Knobs:
+
+- `--final-artifacts`
+- `SKIP_FINAL_ARTIFACTS=0`
+- final export log lines: `final_export_roundtrip`, `final_int8_zlib_roundtrip`
+- strict reload checks for missing/unexpected tensors
+
+Upside:
+
+- Prevents us from optimizing a model that trains well but exports badly.
+- Catches missing LQER sidecars, codec bugs, dtype mistakes, and cap failures.
+
+Cost/risk:
+
+- Adds time at the end of each row.
+- Makes local sweeps slower and noisier if we validate too often.
+
+Current read:
+
+- This is mandatory for serious comparisons.
+- The early 10k CaseOps run showed train-time BPB around `3.9750` but final
+  export BPB around `15.7419`; that entire class of result was misleading.
+- Any result without final export BPB is a scout signal only.
+
+### Decimal Size Cap
+
+Goal: artifact legality.
+
+Knobs:
+
+- `SUBMISSION_SIZE_CAP_BYTES=4000000` for the sub-4 lane.
+- `SUBMISSION_SIZE_CAP_BYTES=16000000` for official 16MB submission thinking.
+- `FAIL_ON_ARTIFACT_CAP=1` for strict runs.
+- `--allow-over-cap` for soft-cap research rows.
+
+Upside:
+
+- Keeps byte accounting honest.
+- Soft-cap mode lets near-miss rows complete final validation so we can see
+  whether they are worth shaving.
+
+Cost/risk:
+
+- Soft-cap rows are not legal by default. They are quality references.
+
+Current read:
+
+- q884 `r6` is the best soft-cap quality reference at `2.5505` BPB but about
+  `35KB` over the sub-4 goal.
+- q884 `r6t12` is the current clean legal sub-4 row at `2.5749` BPB.
+
+### Fixed-Step Versus Wall-Clock Comparison
+
+Goal: fair experiment design.
+
+Knobs:
+
+- `ITERATIONS`
+- `MAX_WALLCLOCK_SECONDS`
+- `WARMDOWN_ITERS`
+- `--wait-for-idle-gpu`
+- `--idle-max-util`
+- `--idle-max-memory-mib`
+- `--idle-seconds`
+
+Upside:
+
+- Fixed-step runs compare optimization quality per step.
+- Wall-clock runs compare competition-relevant throughput and score.
+- Idle guards reduce contamination from other GPU use.
+
+Cost/risk:
+
+- Fixed-step runs can favor slow models that would lose the 10-minute contest.
+- Wall-clock runs can punish models that need fewer but more expensive steps.
+
+Current read:
+
+- r9 recurrence looked worse under wall-clock because it got only about
+  `2791-2850` steps in 10 minutes.
+- The active fixed-5k follow-up compares the high-repeat loop-index rows at the
+  same step budget.
+
+### Exact Byte-Sidecar BPB
+
+Goal: tokenizer/evaluation correctness.
+
+Knobs:
+
+- CaseOps/SP8192 validation byte sidecars.
+- `VAL_TOKENS_LIMIT` for local proxy speed.
+- exact `val_bpb` calculation from original bytes.
+- tokenizer fingerprint/manifest tools in `data/`.
+
+Upside:
+
+- Keeps custom tokenizer experiments legal and auditable.
+- Avoids comparing token loss across incompatible tokenizers.
+
+Cost/risk:
+
+- More complicated than simple token loss.
+- Tokenizer changes receive extra review burden.
+
+Current read:
+
+- Do not compare old SP1024 proxy loss directly to CaseOps/SP8192 public or
+  16MB results.
+- CaseOps/SP8192 with byte sidecars is the serious lane.
+
+## Architecture And Capacity Levers
+
+### Width And Body Capacity
+
+Goal: quality.
+
+Knobs:
+
+- `SUB4_PROFILE`
+- profile fields: model width `d`, factored embedding rank `e`, number of
+  heads, KV heads, MLP multiplier.
+- H100 candidate profiles:
+  `i1l2r2_d1536_e384_h24kv1_mlpinner_mlp050`,
+  `i1l2r2_d2048_e512_h32kv1_mlpinner_mlp025`.
+
+Upside:
+
+- More capacity is the cleanest way to spend unused bytes.
+- Wider shallow HRC was much more promising than the old nano family.
+
+Cost/risk:
+
+- Slower per step.
+- More VRAM pressure on the 2060.
+- Some wide shapes became unstable under sprint learning rates.
+
+Current read:
+
+- d96/d192/d384 taught schedule and speed lessons, but the quality lead moved
+  to d768/e256 q884.
+- d512/e192 i5/l5 was legal and fast but under-capacity.
+- Local 2060 should screen bugs; d1536/e384 and d2048/e512 need H100 testing.
+
+### Factored Tied Embeddings
+
+Goal: size savings, quality under larger vocab.
+
+Knobs:
+
+- `FACTORED_EMBED_DIM`
+- tied embedding settings in profiles.
+- candidate names with `e128`, `e192`, `e256`, `e384`, `e512`.
+
+Upside:
+
+- Makes SP8192/CaseOps viable under small artifacts.
+- Lets us keep richer tokenization without full `8192 x dim` embedding cost.
+
+Cost/risk:
+
+- Too small an embedding rank can bottleneck quality.
+- Larger rank spends bytes quickly.
+
+Current read:
+
+- Full embeddings are brutal under sub-4MB.
+- d768/e256 is currently the strongest local sub-4 width/rank region.
+- d512/e192 was too small for the precision-ladder lane.
+
+### Mirrored IO Tail
+
+Goal: quality per byte.
+
+Knobs:
+
+- `HRC_RECURSIVE_CORE_START`
+- `HRC_ROUTE_REPEATS`
+- `HRC_DEPTH_SCHEDULE_MODE=transition_recursive_cycle`
+- `NUM_UNIQUE_BLOCKS`
+- `EFFECTIVE_DEPTH`
+- candidate shapes such as `i3l3r3`, `i5l5r2`, `i6l9r3`
+
+Upside:
+
+- Gives separate entry/exit transforms while reusing a small core.
+- Lets outer blocks carry higher precision and inner blocks be ternary.
+
+Cost/risk:
+
+- Per unique block, not per virtual occurrence, unless the trainer is changed.
+- More virtual depth increases step time.
+
+Current read:
+
+- q884 `i3l3r3` is the current best sub-4 direction.
+- Extremely deep recurrence such as r9 helps test loop-index behavior, but
+  under wall-clock it loses too many steps locally.
+
+### Repeated Core Depth
+
+Goal: quality via test-time/train-time compute reuse.
+
+Knobs:
+
+- `HRC_ROUTE_REPEATS`
+- candidate suffixes like `r1`, `r2`, `r3`, `r9`
+- `EFFECTIVE_DEPTH`
+
+Upside:
+
+- Adds effective depth without adding many physical parameters.
+- Can improve quality if the tied core learns useful iterative refinement.
+
+Cost/risk:
+
+- Directly slows each step.
+- High repeats can hurt if the core lacks position/depth signal.
+- More repeats were often worse in local wall-clock runs.
+
+Current read:
+
+- q884 r3 is strong.
+- q884 r9 with loop index improved over q884 r9 without loop index, but both
+  were far behind q884 r3 under 10-minute local wall-clock.
+- i5/l5 r2 was better than r1/r3 under wall-clock; r9 is now being tested at
+  fixed 5k steps.
+
+### Loop Index
+
+Goal: quality for repeated cores.
+
+Knobs:
+
+- `HRC_LOOP_INDEX_ENABLED=1`
+- `HRC_LOOP_INDEX_DIM`
+- `HRC_LOOP_INDEX_SCALE_INIT`
+
+Upside:
+
+- Gives the looped middle a signal for virtual pass position.
+- Helps when repeated applications are otherwise ambiguous.
+
+Cost/risk:
+
+- Adds small control parameters and complexity.
+- Can hurt if the route does not need it.
+
+Current read:
+
+- Hurt q884 r3 legal row: `2.5749` without loop index versus `2.6935` with
+  loop index.
+- Helped r9 by about `0.0455` BPB.
+- Helped every tested i5/l5 precision-ladder repeat count.
+- Treat as route-specific, not a default.
+
+### MLP-Only Repeated Core
+
+Goal: speed.
+
+Knobs:
+
+- `HRC_MLP_ONLY_BLOCKS`
+- profile choices that make only outer blocks full attention.
+
+Upside:
+
+- Cuts repeated-core compute.
+- Useful for high-repeat HRC routes.
+
+Cost/risk:
+
+- May remove too much capacity from the core.
+- If the repeated middle is too weak, more repeats only burn time.
+
+Current read:
+
+- The i5/l5 ladder uses MLP-only blocks `5-9` to keep the repeated core cheap.
+- d384 early lanes used attention only on the first block and MLP-only looped
+  middle blocks.
+
+### Frozen Carry
+
+Goal: quality for recurrence with low byte cost.
+
+Knobs:
+
+- `HRC_FROZEN_CARRY_ENABLED=1`
+- `HRC_FROZEN_CARRY_BLOCKS`
+- frozen carry detach controls
+
+Upside:
+
+- Targets repeated middle states directly.
+- Costs little artifact size compared with widening.
+
+Cost/risk:
+
+- Wrong block selection can break shape assumptions.
+- `HRC_FROZEN_CARRY_BLOCKS=all` pulled in mirrored IO-tail repeats and caused a
+  sub-16 suite stop with the smaller core carry matrix.
+
+Current read:
+
+- Implemented and worth retesting.
+- Use default repeated-core selector first.
+
+### Recurrent Injection And Pass Roles
+
+Goal: quality and route conditioning.
+
+Knobs:
+
+- recurrent injection settings logged as `hrc_recur_inject_*`.
+- pass embeddings and pass-role schedule settings.
+- guarded presets that restore pass embeddings, pass roles, loop index, and
+  recurrent injection.
+
+Upside:
+
+- Gives HRC blocks more context about their phase and recurrence.
+- Stabilized or improved some proxy runs.
+
+Cost/risk:
+
+- More controls can slow or overfit small shapes.
+- Guarded d384 improved SP1024 proxy but did not help CaseOps at 1k.
+
+Current read:
+
+- Useful as a guarded quality lane, not a universal default.
+
+## Precision And Quantization Levers
+
+### Train-Time Quantized Forward
+
+Goal: quality honesty and artifact alignment.
+
+Knobs:
+
+- `TRAIN_QUANT_FORWARD=1`
+- `QUANT_BITS_OVERRIDES`
+- `QUANT_TERNARY_PATTERNS`
+- `QUANT_TRAIN_MODE=none`
+
+Upside:
+
+- Trains under the same low-precision views used by export.
+- Avoids the train-dense/export-low cliff.
+- Keeps the training loop free of export/reload conversions.
+
+Cost/risk:
+
+- Fake-quant paths can be slower or unstable for some bit widths on Windows.
+- q6-containing rows showed CUDA illegal-memory failures locally.
+
+Current read:
+
+- This is the serious sub-4 lane.
+- Use `--train-quant-forward` without `--roundtrip-guard` for clean wall-clock
+  training.
+
+### Periodic Quant Roundtrip Guard
+
+Goal: export-honest training guardrail.
+
+Knobs:
+
+- `QUANT_TRAIN_MODE=roundtrip`
+- `QUANT_TRAIN_EVERY`
+- `QUANT_TRAIN_START_FRACTION`
+- runner flag `--roundtrip-guard`
+
+Upside:
+
+- Forces stored weights through the export codec during training.
+- Catches export mismatch early.
+
+Cost/risk:
+
+- Too slow and invasive for serious wall-clock sweeps.
+- Combining it with `TRAIN_QUANT_FORWARD=1` contaminated speed conclusions and
+  caused deeper IO-tail rows to crash or time out.
+
+Current read:
+
+- Keep it as a debugging guardrail, not a default training mode.
+
+### Mixed Precision By Block
+
+Goal: quality and size balance.
+
+Knobs:
+
+- `QUANT_BITS_OVERRIDES=blocks.0.:8,blocks.1.:8,blocks.2.:4`
+- supported bits include q2, q4, q5, q6, q8, and q16/fp16 passthrough.
+- `QUANT_TERNARY_PATTERNS=blocks.3.,blocks.4.,...`
+
+Upside:
+
+- Lets IO blocks keep more precision while repeated core blocks go ternary.
+- q16/q8/q4/q2/ternary ladders can test smooth precision tapering.
+
+Cost/risk:
+
+- Per unique HRC block, not per virtual occurrence.
+- q2 uses fake-quant/export codes, not a packed q2 Tensor Core kernel.
+- q6 path was locally unstable in some Windows/CUDA runs.
+
+Current read:
+
+- q884 IO tail with ternary core is the strongest local sub-4 quality family.
+- q16/q8/q4/q2/ternary i5/l5 is implemented correctly but d512/e192 was too
+  small to compete.
+
+### Ternary Core
+
+Goal: size savings and parameter reuse.
+
+Knobs:
+
+- `QUANT_TERNARY_PATTERNS`
+- `TRAIN_TERNARY_BLOCKS`
+- `TRAIN_TERNARY_GROUP_SIZE`
+- `QUANT_TERNARY_GROUP_SIZE`
+- `TRAIN_TERNARY_SCALE_STAT`
+- `QUANT_TERNARY_SCALE_STAT`
+- `QUANT_TERNARY_SHRINKAGE_FIX=1`
+
+Upside:
+
+- Major artifact compression.
+- Lets the repeated middle be cheap in bytes.
+
+Cost/risk:
+
+- Quality loss if too much of the model is ternary.
+- Requires train-time low precision to avoid export cliff.
+
+Current read:
+
+- Ternary is real and active; we are not merely quantizing at the end.
+- Ternary core plus higher-precision IO tail is better than tiny all-ternary
+  nano shapes.
+
+### Ternary Group Size And Scale Statistic
+
+Goal: quality/size tradeoff.
+
+Knobs:
+
+- `TRAIN_TERNARY_GROUP_SIZE`
+- `QUANT_TERNARY_GROUP_SIZE`
+- `TRAIN_TERNARY_SCALE_STAT`
+- `QUANT_TERNARY_SCALE_STAT`
+
+Upside:
+
+- Smaller groups can improve reconstruction quality.
+- Scale statistic can affect stability and export quality.
+
+Cost/risk:
+
+- Smaller groups add scale overhead.
+- Median/mean choices can interact with shrinkage and optimizer behavior.
+
+Current read:
+
+- Group sizes `64`, `128`, and `256` have been used in different lanes.
+- The q884 lane currently matters more than further group-size tuning, but this
+  remains a real knob.
+
+### q16 Passthrough
+
+Goal: high-precision IO entry/exit.
+
+Knobs:
+
+- `QUANT_BITS_OVERRIDES=blocks.0.:16`
+
+Upside:
+
+- Keeps the first/last physical tail block as fp16 passthrough.
+- Useful for precision-ladder experiments.
+
+Cost/risk:
+
+- Spends more artifact bytes.
+- Did not rescue the d512/e192 i5/l5 lane enough by itself.
+
+Current read:
+
+- q16 passthrough is implemented in both train-time forward and export.
+
+## LQER And Artifact Byte-Spend Levers
+
+### LQER Enablement
+
+Goal: quality recovery after low-bit export.
+
+Knobs:
+
+- `LQER_ENABLED=1`
+- `LQER_RANK`
+- `LQER_TOP_K`
+- `LQER_INCLUDE_PATTERNS`
+- `LQER_EXCLUDE_PATTERNS`
+- `LQER_ASYM_ENABLED=1`
+- `LQER_ASYM_GROUP`
+
+Upside:
+
+- Spends bytes on the tensors with biggest quantization residuals.
+- Restores quality while keeping the main tensor low-bit/ternary.
+
+Cost/risk:
+
+- Can push near-cap rows over the byte goal.
+- Must reload correctly. Ternary layers need sidecars instead of folding into
+  latent weights that would be ternarized away.
+
+Current read:
+
+- Reload-safe LQER is implemented and critical.
+- q884 quality is strongly tied to LQER rank/top-K choices.
+
+### LQER Rank And Top-K
+
+Goal: quality versus size.
+
+Knobs:
+
+- `LQER_RANK=6`, `8`, `16`
+- `LQER_TOP_K=11`, `12`, `14`, `16`, `24`, `32`
+
+Upside:
+
+- Rank controls correction capacity per selected tensor.
+- Top-K controls how many residual tensors receive sidecars.
+
+Cost/risk:
+
+- Higher rank/top-K can exceed the cap.
+- Too low gives up BPB.
+
+Current read:
+
+- q884 `r6t12` is the best clean legal row.
+- q884 `r6` is better quality but slightly over cap.
+- `t12` alone was closest to legal in one sweep but gave up quality.
+
+### LQER Factor Bits
+
+Goal: size savings in symmetric fallback.
+
+Knobs:
+
+- `LQER_FACTOR_BITS`
+
+Upside:
+
+- Could reduce sidecar bytes in symmetric LQER mode.
+
+Cost/risk:
+
+- Does not help when asymmetric LQER is enabled.
+
+Current read:
+
+- With `LQER_ASYM_ENABLED=1`, factor bits are not a useful byte lever. Do not
+  spend more matrix time on `fb3` unless testing the symmetric fallback.
+
+### IO-Aware LQER
+
+Goal: quality recovery where it matters most.
+
+Knobs:
+
+- `LQER_INCLUDE_PATTERNS=tok_emb.weight,embed_proj,blocks.`
+- `LQER_EXCLUDE_PATTERNS=lm_head.weight,token_smear,attn_gate_w,attn_out_gate`
+
+Upside:
+
+- Directs residual bytes to embeddings/projection/blocks rather than tiny
+  controls or tied output.
+
+Cost/risk:
+
+- Include/exclude mistakes can waste bytes or miss important tensors.
+
+Current read:
+
+- IO-aware LQER helped in 1k export-aware screens.
+- For the q884 lane, rank/top-K tuning is the practical byte/quality control.
+
+### Codec Choice
+
+Goal: artifact size.
+
+Knobs:
+
+- `MODEL_CODEC=lzma`
+- `MODEL_CODEC_LEVEL=9`
+- zlib fallback in older logs
+
+Upside:
+
+- lzma is preferred for tiny artifacts.
+- Can be the difference between soft-cap and legal.
+
+Cost/risk:
+
+- Compression time and compatibility must remain acceptable.
+
+Current read:
+
+- Use lzma for sub-4.
+- Sub-16 q6 proof logs used zlib in some paths; sub-16 has more headroom.
+
+### Float Keep/Control Tensor Policy
+
+Goal: stability and size.
+
+Knobs:
+
+- `INT8_KEEP_FLOAT_MAX_NUMEL`
+- `KEEP_CONTROL_PARAMS_FP32`
+- ternary exclude patterns: `tok_emb.weight,lm_head.weight,embed_proj`
+- int8 promote patterns
+
+Upside:
+
+- Keeps tiny control tensors stable and avoids quantizing things that are not
+  worth compressing.
+
+Cost/risk:
+
+- Too many keep-float tensors waste bytes.
+- Too few can destabilize training or export.
+
+Current read:
+
+- Keep tiny controls precise in serious lanes.
+- Exclude/promote patterns need to be checked when adding new modules.
+
+## Optimizer And Schedule Levers
+
+### Hybrid Muon Versus AdamW
+
+Goal: quality and speed tradeoff.
+
+Knobs:
+
+- `OPTIMIZER_PRESET=hybrid`
+- AdamW-only speed probes
+- Muon trunk with Adam for scalar/vector/embedding params
+
+Upside:
+
+- Muon improved quality substantially in early sub-4 quality rescue runs.
+
+Cost/risk:
+
+- Slower than AdamW.
+- Needs dtype and backend tuning.
+
+Current read:
+
+- AdamW was worse for quality in the sub-4 rescue phase.
+- Keep hybrid Muon as the default serious lane unless a speed probe preserves
+  the loss curve.
+
+### Learning Rates By Parameter Family
+
+Goal: quality and stability.
+
+Knobs:
+
+- `TIED_EMBED_LR`
+- `MATRIX_LR`
+- `SCALAR_LR`
+- profile presets such as `cooltaper5k_cold_tokens8k`
+
+Upside:
+
+- Separate LR for embeddings, matrices, and scalar/control params is a strong
+  stabilizer.
+
+Cost/risk:
+
+- Larger shapes can explode with sprint LR.
+- Too-low LR underlearns.
+
+Current read:
+
+- Cooler/cold LR rescued d768/e256 on CaseOps.
+- Early d96 wins came more from LR/warmdown fixes than from deeper shapes.
+
+### Warmup And Warmdown
+
+Goal: stability and final quality.
+
+Knobs:
+
+- `LR_WARMUP_ITERS`
+- `WARMDOWN_ITERS`
+- `LR_WARMDOWN_STYLE=cosine`
+- `LR_MIN_SCALE`
+- `WARMUP_STEPS` only as runtime reset/warmup, not LR warmup
+
+Upside:
+
+- Real LR warmup stabilized larger models.
+- Long cosine warmdown prevented late non-finite failures.
+- min-LR can preserve movement late.
+
+Cost/risk:
+
+- Wrong warmdown can waste steps or hurt late quality.
+- In fixed-iteration runs, warmdown should match actual step budget.
+
+Current read:
+
+- d384 needed long wall-clock warmdown for finite 600s runs.
+- d768/e256 cold 8k fixed 5k was better than simply running to 600s in one
+  tested lane.
+- `LR_MIN_SCALE` is implemented but not promoted by itself.
+
+### Muon Variants
+
+Goal: quality and stability.
+
+Knobs:
+
+- `MUON_NS_VARIANT=polar_express`
+- `MUON_NS_VARIANT=gram_polar`
+- `MUON_ROW_NORMALIZE=1`
+- `MUON_WEIGHT_DECAY`
+- `MUON_WD`
+- `MUON_WEIGHT_DECAY_MODE=huber`
+- `MUON_WEIGHT_DECAY_HUBER_DELTA_SCALE`
+- `MUON_BACKEND_STEPS`
+- `MUON_DTYPE=fp16`
+
+Upside:
+
+- Matches public leader-inspired optimizer tricks.
+- Huber/decoupled decay may suppress outlier tails before low-bit export.
+- fp16 Muon state can speed local training.
+
+Cost/risk:
+
+- Several public-knob screens did not beat the cold baseline.
+- Row-normalized Muon and gates were slower in some screens.
+
+Current read:
+
+- Implemented and available.
+- Use as ablation knobs, not default replacements, until they win at 5k or
+  wall-clock.
+
+### QK Gain
+
+Goal: attention quality/stability.
+
+Knobs:
+
+- `QK_GAIN_INIT=5.25`
+
+Upside:
+
+- Public-leader-derived ablation.
+
+Cost/risk:
+
+- Did not beat current local lead in the sub-4 screens.
+
+Current read:
+
+- Keep as a controlled ablation.
+
+### Logit Softcap
+
+Goal: stability and loss behavior.
+
+Knobs:
+
+- `LOGIT_SOFTCAP`
+
+Upside:
+
+- Helped guarded stability paths.
+
+Cost/risk:
+
+- Some sub-4 lead/probe lanes run without it for speed or because the public
+  fused CE path differs.
+
+Current read:
+
+- Useful for guarded stability and d384/d512 rescue.
+- Not a universal default for q884.
+
+### Loss Precision
+
+Goal: stability versus speed.
+
+Knobs:
+
+- `LOSS_FP32=1` or `0`
+- `LOSS_TOKEN_STRIDE`
+- `LOSS_TOKEN_RANDOM_OFFSET`
+
+Upside:
+
+- fp32 loss improves stability.
+- Lower precision/probe loss can speed experiments.
+
+Cost/risk:
+
+- Turning off fp32 loss can damage quality/stability.
+- Striding/sampling loss can bias training.
+
+Current read:
+
+- Keep `LOSS_FP32=1` for serious quality runs.
+- Use speed shortcuts only as probes.
+
+## Neural Control And Side-Channel Levers
+
+### Scalar Smear Gate
+
+Goal: quality.
+
+Knobs:
+
+- `SMEAR_GATE_MODE=scalar`
+- publicstack presets
+
+Upside:
+
+- Public leader-inspired residual control.
+
+Cost/risk:
+
+- Did not beat the cold baseline in the local 1k/5k screens.
+- Stacking gates blindly can hurt.
+
+Current read:
+
+- Implemented and smoke-tested.
+- Retune before promotion.
+
+### Sparse Attention Gate
+
+Goal: quality and attention control.
+
+Knobs:
+
+- `SPARSE_ATTN_GATE_ENABLED=1`
+- older transparent path: `ATTN_OUT_GATE_ENABLED=1`, `ATTN_OUT_GATE_WIDTH`
+
+Upside:
+
+- Public-style attention-output gating.
+
+Cost/risk:
+
+- Slight overhead.
+- Stacking with scalar smear hurt in the 1k screen.
+
+Current read:
+
+- Works, not promoted.
+
+### BigramHash Side Channel
+
+Goal: quality via cheap lexical side information.
+
+Knobs:
+
+- Bigram vocab and dimension model knobs.
+- competitor records mention BigramHash sizes such as 10240/3072.
+
+Upside:
+
+- Can add lexical/context signal with a compact interface.
+
+Cost/risk:
+
+- Local sub-4 BigramHash 16k x 128 did not win.
+- Larger variants caused Windows CUDA teardown failures in some runs.
+
+Current read:
+
+- Not a promoted sub-4 lever right now.
+
+### VE / Extra Byte-Spend Side Channels
+
+Goal: quality by spending unused bytes.
+
+Knobs:
+
+- VE settings in model profiles.
+
+Upside:
+
+- Another way to spend byte headroom.
+
+Cost/risk:
+
+- Earlier VE/bigram byte-spend lanes did not beat plain e80 in the nano
+  family.
+
+Current read:
+
+- Low priority compared with q884/LQER/capacity.
+
+### XSA / Extra Attention
+
+Goal: quality.
+
+Knobs:
+
+- XSA settings in sub-16/public branch families.
+
+Upside:
+
+- Strong public records use XSA/partial XSA.
+
+Cost/risk:
+
+- More code and compute.
+- Not yet the main sub-4 branch.
+
+Current read:
+
+- More relevant to sub-16 than current sub-4 q884 work.
+
+### Test-Time Training
+
+Goal: evaluation quality.
+
+Knobs:
+
+- score-first TTT control presets.
+- future warm-A/phased LoRA TTT.
+- TTT prefix/update controls in the trainer.
+
+Upside:
+
+- Public leaders use legal TTT variants.
+- Local control TTT helped itself slightly.
+
+Cost/risk:
+
+- Legality rules are strict: can only train on already-scored validation tokens.
+- Full warm-A/phased LoRA is larger branch work.
+
+Current read:
+
+- Control-only TTT improved one run from `2.6976` to `2.6834` BPB, but did not
+  beat the lead.
+- Full public-style TTT remains one of the biggest missing sub-16/sub-4 quality
+  levers.
+
+## Tokenizer And Data Levers
+
+### CaseOps/SP8192
+
+Goal: quality and fair comparison.
+
+Knobs:
+
+- CaseOps dataset path:
+  `fineweb10B_sp8192_lossless_caps_caseops_v1_reserved`
+- tokenizer:
+  `fineweb_8192_bpe_lossless_caps_caseops_v1_reserved.model`
+- `DATA_PATH`
+- `TOKENIZER_PATH`
+- `VOCAB_SIZE=8192`
+
+Upside:
+
+- Aligns with current strong public transformer/HRC records.
+- Uses exact byte sidecars for BPB.
+
+Cost/risk:
+
+- Larger vocab interface; needs factored tied embeddings under sub-4.
+
+Current read:
+
+- Serious experiments should use CaseOps/SP8192 unless specifically testing a
+  tokenizer alternative.
+
+### Vocab Size Sweep
+
+Goal: tokenizer quality/size/speed tradeoff.
+
+Knobs:
+
+- `VOCAB_SIZE=4096`, `6144`, `8192`
+- tokenizer sweep specs in `data/tokenizer_specs_lossless_caseops_sweep.json`
+
+Upside:
+
+- Smaller vocab can reduce embedding/output bytes and maybe speed.
+- Larger vocab can reduce token fertility and improve sequence modeling.
+
+Cost/risk:
+
+- Smaller vocab increases token count.
+- Larger vocab is expensive under sub-4.
+
+Current read:
+
+- Sub-4 should test 4096/6144 CaseOps or word-boundary variants.
+- Sub-16 can afford 8192 as the main lane.
+
+### Word-Boundary-Aware BPE/Unigram
+
+Goal: quality by smarter tokenization without lossy whole-word vocab.
+
+Knobs:
+
+- SentencePiece BPE/Unigram config.
+- word-boundary behavior.
+- byte fallback and exact reconstruction.
+
+Upside:
+
+- Tests the "whole word" instinct safely.
+- Could reduce harmful fragmentation without a huge pure word vocab.
+
+Cost/risk:
+
+- Must prove exact byte accounting.
+- Needs artifact and step-speed measurement, not only token fertility.
+
+Current read:
+
+- Worth exploring after the current model-shape/quant levers.
+
+### Lossless CaseOps-v2 / Reserved Operators
+
+Goal: quality and token fertility.
+
+Knobs:
+
+- reversible capitalization controls.
+- reversible symbols for repeated whitespace/newline runs, URLs/emails, numeric
+  formatting.
+- exact original-byte sidecars.
+
+Upside:
+
+- Can clean the modeling task while staying legal.
+
+Cost/risk:
+
+- Any many-to-one normalization without a sidecar is risky.
+- More tokenizer controls add review burden.
+
+Current read:
+
+- Safe if reversible and byte-accounted.
+- Avoid lossy casefold/lowercase/accent stripping/NFKC lanes for default
+  submission strategy.
+
+### Training Shards And Local Proxy Data
+
+Goal: speed of iteration and fair data scaling.
+
+Knobs:
+
+- `--train-shards`
+- local proxy split tools.
+- `MATCHED_FINEWEB_*` export env vars.
+
+Upside:
+
+- Faster local iteration.
+- Reproducible shard prefixes.
+
+Cost/risk:
+
+- Small local shards do not represent official 8xH100 token exposure.
+- Token budget per wall-clock can dominate model comparison.
+
+Current read:
+
+- Use local proxies for screening only.
+- H100 runs are needed to judge official competitiveness.
+
+## Training Throughput Levers
+
+### Batch Tokens And Sequence Length
+
+Goal: speed/quality balance.
+
+Knobs:
+
+- `TRAIN_BATCH_TOKENS`
+- `TRAIN_SEQ_LEN`
+- `VAL_BATCH_SIZE`
+- microbatch settings
+- `GRAD_ACCUM_STEPS`
+
+Upside:
+
+- Larger batches can improve token exposure and stability.
+- Shorter sequences speed local runs.
+
+Cost/risk:
+
+- Larger batches can hurt early local validation or exceed VRAM.
+- Short sequences may under-train long-context behavior.
+
+Current read:
+
+- d768/e256 exact 8k-token batches improved fixed 5k quality but slowed steps.
+- Larger batch tokens were worse in some d384 1k screens.
+- 16MB public lanes use vastly larger token budgets than the local 2060.
+
+### Fused QKV
+
+Goal: speed.
+
+Knobs:
+
+- `TRAIN_FUSED_QKV=1`
+
+Upside:
+
+- Reduces projection overhead.
+- Ported from sub-4 speed work into sub-16 probes.
+
+Cost/risk:
+
+- Needs correctness checks when attention shapes change.
+
+Current read:
+
+- Keep enabled in speed-focused lanes where verified.
+
+### Lower Precision Params And Optimizer State
+
+Goal: speed and memory savings.
+
+Knobs:
+
+- `PARAM_DTYPE=fp16`
+- `MUON_DTYPE=fp16`
+- `TRAIN_CASTED_LINEAR_PARAM_DTYPE=model`
+- `TRAIN_TERNARY_PARAM_DTYPE=model`
+- `USE_GRAD_SCALER=0`
+
+Upside:
+
+- Faster and lower memory on local CUDA.
+- Avoids extra scaler work when the lane is already low precision.
+
+Cost/risk:
+
+- Can reduce stability for some larger or conservative sub-16 rows.
+
+Current read:
+
+- Good for sub-4 lanes.
+- Sub-16 conservative q6 proof remains fp32/GradScaler until speed probes prove
+  stable.
+
+### Zero-Grad And Validation Frequency
+
+Goal: speed.
+
+Knobs:
+
+- `POST_STEP_ZERO_GRAD=0`
+- `VAL_LOSS_EVERY=0` for speed probes.
+- `SKIP_INITIAL_VAL=1`
+- `TRAIN_LOG_EVERY`
+
+Upside:
+
+- Avoids extra work inside the timed loop.
+- More steps in 10 minutes.
+
+Cost/risk:
+
+- Less monitoring during runs.
+- Need final validation to avoid fooling ourselves.
+
+Current read:
+
+- Good for speed probes.
+- Serious matrix rows should still produce final artifacts and final validation.
+
+### Loss Shortcuts
+
+Goal: speed.
+
+Knobs:
+
+- `LOSS_FP32=0`
+- `LOSS_VOCAB_SAMPLE_SIZE`
+- sampled vocab correction.
+- loss token stride/random offset.
+
+Upside:
+
+- Can reduce compute on local 2060.
+
+Cost/risk:
+
+- Sampled vocab loss was much worse in CaseOps tests.
+- Lower precision loss can destabilize quality comparisons.
+
+Current read:
+
+- Use only as risk probes.
+- Do not promote sampled vocab for the current sub-4 lane.
+
+### CUDA Environment
+
+Goal: build/runtime stability.
+
+Knobs:
+
+- `scripts/check_cuda126_env.py`
+- `scripts/use_cuda126.ps1`
+- local CUDA 12.6-compatible tooling.
+- `CUDA_LAUNCH_BLOCKING=1` for crash repro.
+
+Upside:
+
+- Avoids PyTorch `2.11.0+cu126` versus `nvcc` 11.7 extension mismatch.
+- Makes CUDA extension experiments less risky.
+
+Cost/risk:
+
+- Windows extension builds remain higher friction than Linux/H100.
+
+Current read:
+
+- Local extension work should use the CUDA 12.6 environment checks.
+- q6 illegal-memory rows need Linux/H100 repro before drawing ML conclusions.
+
+### Custom Ternary Kernels
+
+Goal: speed.
+
+Knobs:
+
+- `TRAIN_TERNARY_DENSE_KERNEL=1`
+- `TRAIN_TERNARY_PACKED_KERNEL=1`
+- `scripts/bench_packed_ternary_linear.py`
+- `ternary_golf/packed_cuda.py`
+
+Upside:
+
+- Potentially reduces ternary materialization/matmul overhead.
+- Long-term path for "train ternary from the start" without waste.
+
+Cost/risk:
+
+- Current packed matmul replacement is much slower locally.
+- JIT/load overhead matters inside timed competition settings.
+- Replacing mature GEMM is hard, especially on RTX 2060.
+
+Current read:
+
+- Packed kernel is not competitive yet.
+- Next serious kernel work should target fused dense ternary materialization
+  feeding Tensor Cores rather than replacing Tensor Core GEMM.
+
+### Compile / Triton / Fused CE
+
+Goal: speed and quality.
+
+Knobs:
+
+- torch compile controls if added.
+- fused softcapped CE branch.
+- Triton kernels.
+
+Upside:
+
+- Public leaders use fused paths for speed.
+
+Cost/risk:
+
+- High risk on this Windows/2060 setup.
+- Compile overhead may not pay back in short local runs.
+
+Current read:
+
+- Avoid compile locally unless a profile proves payoff.
+- Fused softcapped CE is a future branch, not current sub-4 default.
+
+## Export And Size-Saving Levers
+
+### Bit Width
+
+Goal: size savings.
+
+Knobs:
+
+- q2, q4, q5, q6, q8, q16 policy.
+- `QUANT_WEIGHT_BITS`
+- `QUANT_BITS_OVERRIDES`
+
+Upside:
+
+- Direct control over artifact size.
+- Mixed precision lets us spend bits where needed.
+
+Cost/risk:
+
+- Too low a bit width damages quality.
+- q6 local path showed instability.
+
+Current read:
+
+- q884 is the best tested sub-4 compromise.
+- q16/q8/q4/q2/ternary is correct but needs more capacity to matter.
+
+### Reduce LQER Payload
+
+Goal: fit under cap.
+
+Knobs:
+
+- lower `LQER_TOP_K`
+- lower `LQER_RANK`
+- exclude tensors from `LQER_INCLUDE_PATTERNS`
+- compress with lzma
+
+Upside:
+
+- Can turn a strong soft-cap row into a legal row.
+
+Cost/risk:
+
+- The best quality row may lose BPB when shaving residuals.
+
+Current read:
+
+- q884 `r6` needs about `35KB` shaved.
+- q884 `r6t12` is the current legal compromise.
+
+### Code Size And Logging
+
+Goal: artifact size and run cleanliness.
+
+Knobs:
+
+- `LOG_CODE_SNAPSHOT=0`
+- `LOG_NVIDIA_SMI=0`
+- keep generated logs/checkpoints out of the submission artifact.
+
+Upside:
+
+- Saves counted bytes where code size matters.
+- Keeps logs cleaner.
+
+Cost/risk:
+
+- Less debugging context unless logs are stored separately.
+
+Current read:
+
+- Disable snapshots in sub-4 matrix runs.
+
+### Smaller Vocab Or Embedding Rank
+
+Goal: size savings.
+
+Knobs:
+
+- `VOCAB_SIZE`
+- `FACTORED_EMBED_DIM`
+- tokenizer choice.
+
+Upside:
+
+- Large byte savings at the lexical interface.
+
+Cost/risk:
+
+- More tokens per byte or weaker lexical representation can hurt BPB.
+
+Current read:
+
+- Test 4096/6144 CaseOps variants for sub-4.
+- Keep SP8192 as main sub-16 lane.
+
+## Public-Leader-Inspired Levers
+
+### CaseOps And Byte Sidecars
+
+Goal: quality and legality.
+
+Status:
+
+- Already part of the serious lane.
+
+### Scalar Smear + Sparse Gate + LQER
+
+Goal: match public neural controls.
+
+Status:
+
+- Implemented.
+- Not automatically promoted; publicstack helped 1k export-aware screens but
+  not enough later.
+
+### Polar/Gram Muon, Row Norm, Muon WD
+
+Goal: optimizer quality.
+
+Status:
+
+- Implemented.
+- Treat as ablation knobs.
+
+### Full Warm-A / Phased LoRA TTT
+
+Goal: eval-time quality.
+
+Status:
+
+- Not fully implemented in the current sub-4 lane.
+- High-value future work if legality and byte accounting stay clean.
+
+### FLA / GatedDeltaNet
+
+Goal: architecture leap.
+
+Status:
+
+- Public branch pressure for sub-16.
+- Large architecture pivot, not a safe incremental HRC lever.
+
+### Byte-Level PPM Mixture
+
+Goal: score.
+
+Status:
+
+- Potentially very strong but legality-gated.
+- Keep separate from default neural lane until organizer guidance is clear.
+
+## Candidate Family Levers
+
+### Nano/Micro Family
+
+Examples:
+
+- `i1l2r2_d96_e48_h3mha_mlpinner_mlp2`
+- `i1l2r2_d192_e80_h3mha_mlpinner_mlp15`
+- `i1l2r2_d384_e128_h8kv1_mlpinner_mlp10`
+
+Use when:
+
+- Fast smoke tests.
+- Debugging train-time ternary or schedule behavior.
+
+Current read:
+
+- No longer the quality lead.
+- Useful for fast iteration and stability lessons.
+
+### Wide Shallow HRC
+
+Examples:
+
+- `i1l2r2_d768_e256_h12kv1_mlpinner_mlp075`
+- `i1l2r2_d1536_e384_h24kv1_mlpinner_mlp050`
+- `i1l2r2_d2048_e512_h32kv1_mlpinner_mlp025`
+
+Use when:
+
+- Spending byte headroom on capacity.
+- H100 scaling runs.
+
+Current read:
+
+- d768/e256 is the local anchor.
+- H100 capacity ladder is a high-value next step.
+
+### q884 IO-Tail Family
+
+Examples:
+
+- `i3l3r3_d768e256_q884_coret_lqer_r6t12`
+- `i3l3r3_d768e256_q884_coret_lqer_r6`
+
+Use when:
+
+- Chasing current best sub-4 quality.
+
+Current read:
+
+- Current promoted legal family.
+- Improve by shaving soft-cap row, widening carefully, or retuning LQER.
+
+### Precision Ladder i5/l5 Family
+
+Examples:
+
+- `i5l5r2_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12`
+- `i5l5r9_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12`
+
+Use when:
+
+- Testing the hypothesis that smooth precision tapering into a ternary core
+  helps.
+
+Current read:
+
+- Correctly implemented from step one.
+- d512/e192 is under-capacity; loop index helps this family.
+
+### i6/l9 Deep IO Tail
+
+Examples:
+
+- `i6l9r3_d256e96_q886644_coret`
+- `i6l9r3_d320e128_q886644_coret_lqer`
+
+Use when:
+
+- Testing long IO ladder shapes.
+
+Current read:
+
+- Did not beat q884 r3.
+- Often slower or too narrow.
+
+## Negative Or Caution Levers
+
+Do not promote these without new evidence:
+
+- Export-only quantization.
+- `QUANT_TRAIN_MODE=roundtrip` inside serious wall-clock runs.
+- `LQER_FACTOR_BITS` as a size lever with asymmetric LQER enabled.
+- Naive whole-word tokenizer.
+- Lossy lowercasing, casefolding, accent stripping, or NFKC normalization.
+- Sampled vocab loss for current CaseOps sub-4.
+- AdamW-only for quality.
+- Very high recurrence locally without a step-budget reason.
+- Packed ternary matmul replacement as currently implemented.
+- q6 train-time fake-quant on this Windows/CUDA path without crash repro.
+- Comparing SP1024 proxy loss to CaseOps/SP8192 BPB.
+- Wall-clock comparisons made while the GPU is busy.
+
+## Practical Pull Lists
+
+### If The Goal Is Better Sub-4 Quality
+
+1. Start from `i3l3r3_d768e256_q884_coret_lqer_r6t12`.
+2. Try to shave the soft-cap `r6` row below 4MB.
+3. Spend bytes on capacity or LQER, not unused headroom.
+4. Keep `TRAIN_QUANT_FORWARD=1`.
+5. Use CaseOps/SP8192 and final export BPB.
+6. Test loop index only if route depth is high enough to justify it.
+
+### If The Goal Is More Sub-4 Speed
+
+1. Use shallower/wider rows before deep r9 recurrence.
+2. Keep fused QKV and low-precision params where stable.
+3. Avoid roundtrip projection during training.
+4. Skip periodic validation inside timed runs.
+5. Use idle GPU guards for fair wall-clock matrices.
+6. Consider kernel work only after the model lane is worth optimizing.
+
+### If The Goal Is Smaller Artifact Size
+
+1. Lower LQER top-K or rank.
+2. Tighten LQER include/exclude patterns.
+3. Use lzma level 9.
+4. Reduce factored embedding rank or vocab size.
+5. Push more core blocks to ternary.
+6. Keep code/log artifacts out of counted payload.
+
+### If The Goal Is Better Sub-16
+
+1. Stay close to q6 proof plus CaseOps/SP8192.
+2. Resume LQER/frozen-carry/publicstack ladder.
+3. Add speed probes only if loss movement tracks baseline.
+4. Implement or isolate legal full TTT.
+5. Consider larger architecture branches separately from HRC incremental work.
+
+### If The Goal Is A Safe Tokenizer Improvement
+
+1. Keep every transform reversible.
+2. Preserve exact original byte sidecars.
+3. Sweep CaseOps/word-boundary BPE vocab sizes 4096, 6144, 8192.
+4. Measure token fertility, final artifact bytes, BPB, and step speed.
+5. Avoid lossy normalization unless explicitly approved.
+
+## Current Best Next Bets
+
+1. Finish the fixed-5k loop-index comparison and use it to separate per-step
+   quality from wall-clock speed.
+2. Improve the q884 r3 legal row or shave the q884 `r6` soft-cap row.
+3. Run the d1536/e384 and d2048/e512 H100 capacity ladder with export-honest
+   train-time quant.
+4. Resume sub-16 LQER/frozen-carry/publicstack after the corrected carry block
+   selector.
+5. Build the safe tokenizer sweep only with exact byte accounting.

@@ -68,6 +68,8 @@ priorities, not claim final scores.
 - `records/*.md` - human-written experiment ledgers and current conclusions.
 - `records/experiment_synthesis_20260426.md` - compact read of the current
   state across sub-4, sub-16, tokenizer, and systems work.
+- `levers.md` - catalog of the quality, speed, size, tokenizer, systems, and
+  legality levers explored so far.
 - `GRANT_SUMMARY.md` - short grant-application summary.
 
 Generated run directories, checkpoints, datasets, tokenizer downloads, virtual
