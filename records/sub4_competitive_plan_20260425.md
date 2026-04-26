@@ -503,3 +503,69 @@ Fair rerun completion:
   but the candidate needs a byte shave before it is legal. The q864 r2 row is
   not trustworthy until the illegal-memory issue is debugged with
   `CUDA_LAUNCH_BLOCKING=1`.
+
+## q884 IO-Tail Finding
+
+The fair rerun promoted `i3l3r3_d768e256_q884_coret_lqer` as the best current
+sub-4 direction, even though it landed just over the strict decimal cap:
+
+- score signal: `2.5252` BPB at the 600-second wallclock stop.
+- throughput: `4114` steps at `145.88ms/step` on the local 2060 Super.
+- artifact: `4,060,837` bytes, only `60,837` bytes over the decimal 4MB goal.
+- route: `0,1,2,3,4,5,3,4,5,3,4,5,2,1,0`.
+- train-time precision: q8/q8/q4 IO blocks plus ternary repeated core blocks.
+
+Why it likely beat the other fair rows:
+
+- It is the first train-time-quantized IO-tail row that spends the byte budget.
+  The shallow q8 rows leave about 1MB unused and stop around `3.85-3.89` BPB.
+- The mirrored IO tail gives a real entry/exit transform instead of asking one
+  shallow tied block stack to do everything.
+- The ternary middle is reused three times, buying effective depth without
+  paying for three separate dense cores.
+- q8/q8/q4 avoids the q6 train-time fake-quant path. Both q6-containing fair
+  candidates hit CUDA illegal memory access on this Windows/PyTorch/CUDA stack,
+  so q6 should be treated as suspect until separately debugged.
+- LQER is probably carrying meaningful export recovery. The over-cap artifact
+  reported `235,664` bytes of raw LQER payload, which is exactly the part we can
+  squeeze first.
+
+The curve is also informative: `3.0393` BPB at 1k, `2.5695` at 2k, `2.5237` at
+3k, and `2.5252` at 4k. Most of the local 10-minute quality arrives by 3k
+steps; further gains are more likely to come from byte allocation, the LR
+tail/cooldown, and better sidecar choices than from only pushing longer local
+runs.
+
+Runner changes for the next pass:
+
+- `scripts/run_sub4_iotail_quant_matrix.py` now exposes
+  `LQER_FACTOR_BITS` through `lqer_env(...)`.
+- It adds `--allow-over-cap`, which sets `FAIL_ON_ARTIFACT_CAP=0` so near-cap
+  candidates still complete final export validation.
+- New q884 byte/quality rows:
+  - `i3l3r3_d768e256_q884_coret_lqer_t12`
+  - `i3l3r3_d768e256_q884_coret_lqer_fb3`
+  - `i3l3r3_d768e256_q884_coret_lqer_r6`
+  - `i3l3r3_d768e256_q884_coret_lqer_t12fb3`
+
+Next targeted sweep: rerun q884 as a soft-cap baseline with exact final
+roundtrip, then compare smaller LQER top-K/factor/rank variants. If the smaller
+sidecars hold BPB while dropping below 4MB, promote the best legal row. If the
+soft-cap baseline is clearly better, keep it as the 4MB-plus research lane and
+try to recover the missing `60-100KB` from code size, LQER exclusions, or q4
+payload compression.
+
+Active targeted sweep:
+
+- record dir: `records/sub4-q884-byte-quality-10m-20260425-211131`
+- settings: 10-minute local wallclock per row, `TRAIN_QUANT_FORWARD=1`,
+  `QUANT_TRAIN_MODE=none`, final artifacts, idle guard, and
+  `--allow-over-cap`.
+- rows:
+  - `i3l3r3_d768e256_q884_coret_lqer`
+  - `i3l3r3_d768e256_q884_coret_lqer_t12`
+  - `i3l3r3_d768e256_q884_coret_lqer_fb3`
+  - `i3l3r3_d768e256_q884_coret_lqer_r6`
+  - `i3l3r3_d768e256_q884_coret_lqer_t12fb3`
+- startup check: the first row waited `30.284s` for the idle guard and then
+  began training with the GPU at full load.

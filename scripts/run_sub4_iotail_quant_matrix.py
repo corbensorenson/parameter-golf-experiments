@@ -134,11 +134,12 @@ def route_env(
     }
 
 
-def lqer_env(rank: int = 8, top_k: int = 16) -> dict[str, str]:
+def lqer_env(rank: int = 8, top_k: int = 16, factor_bits: int = 4) -> dict[str, str]:
     return {
         "LQER_ENABLED": "1",
         "LQER_RANK": str(rank),
         "LQER_TOP_K": str(top_k),
+        "LQER_FACTOR_BITS": str(factor_bits),
         "LQER_ASYM_ENABLED": "1",
         "LQER_ASYM_GROUP": "64",
         "LQER_INCLUDE_PATTERNS": "tok_emb.weight,embed_proj,blocks.",
@@ -265,6 +266,78 @@ CANDIDATES: list[dict[str, Any]] = [
                 io_quant=(8, 8, 4),
             ),
             **lqer_env(rank=8, top_k=16),
+        },
+    },
+    {
+        "name": "i3l3r3_d768e256_q884_coret_lqer_t12",
+        "base_profile": "i1l2r2_d768_e256_h12kv1_mlpinner_mlp075",
+        "preset": "2060sprint_micro_muon_cooltaper5k_cold_tokens8k",
+        "env": {
+            **route_env(
+                io_width=3,
+                loop_width=3,
+                repeats=3,
+                model_dim=768,
+                embed_dim=256,
+                heads=12,
+                mlp_mult=0.75,
+                io_quant=(8, 8, 4),
+            ),
+            **lqer_env(rank=8, top_k=12),
+        },
+    },
+    {
+        "name": "i3l3r3_d768e256_q884_coret_lqer_fb3",
+        "base_profile": "i1l2r2_d768_e256_h12kv1_mlpinner_mlp075",
+        "preset": "2060sprint_micro_muon_cooltaper5k_cold_tokens8k",
+        "env": {
+            **route_env(
+                io_width=3,
+                loop_width=3,
+                repeats=3,
+                model_dim=768,
+                embed_dim=256,
+                heads=12,
+                mlp_mult=0.75,
+                io_quant=(8, 8, 4),
+            ),
+            **lqer_env(rank=8, top_k=16, factor_bits=3),
+        },
+    },
+    {
+        "name": "i3l3r3_d768e256_q884_coret_lqer_r6",
+        "base_profile": "i1l2r2_d768_e256_h12kv1_mlpinner_mlp075",
+        "preset": "2060sprint_micro_muon_cooltaper5k_cold_tokens8k",
+        "env": {
+            **route_env(
+                io_width=3,
+                loop_width=3,
+                repeats=3,
+                model_dim=768,
+                embed_dim=256,
+                heads=12,
+                mlp_mult=0.75,
+                io_quant=(8, 8, 4),
+            ),
+            **lqer_env(rank=6, top_k=16),
+        },
+    },
+    {
+        "name": "i3l3r3_d768e256_q884_coret_lqer_t12fb3",
+        "base_profile": "i1l2r2_d768_e256_h12kv1_mlpinner_mlp075",
+        "preset": "2060sprint_micro_muon_cooltaper5k_cold_tokens8k",
+        "env": {
+            **route_env(
+                io_width=3,
+                loop_width=3,
+                repeats=3,
+                model_dim=768,
+                embed_dim=256,
+                heads=12,
+                mlp_mult=0.75,
+                io_quant=(8, 8, 4),
+            ),
+            **lqer_env(rank=8, top_k=12, factor_bits=3),
         },
     },
     {
@@ -445,6 +518,7 @@ def run_matrix(
     train_quant_forward: bool,
     quant_train_every: int,
     roundtrip_guard: bool,
+    allow_over_cap: bool,
     wait_for_idle: bool,
     idle_max_util: int,
     idle_max_memory_mib: int,
@@ -478,6 +552,7 @@ def run_matrix(
                 "TRAIN_QUANT_FORWARD": "1" if train_quant_forward else "0",
                 "QUANT_TRAIN_MODE": "roundtrip" if roundtrip_guard else "none",
                 "QUANT_TRAIN_EVERY": str(quant_train_every),
+                "FAIL_ON_ARTIFACT_CAP": "0" if allow_over_cap else "1",
                 "SKIP_FINAL_ARTIFACTS": "0" if final_artifacts else "1",
                 "PYTHONUNBUFFERED": "1",
             }
@@ -498,6 +573,7 @@ def run_matrix(
             "train_quant_forward": int(train_quant_forward),
             "quant_train_every": quant_train_every,
             "roundtrip_guard": int(roundtrip_guard),
+            "allow_over_cap": int(allow_over_cap),
             "idle_wait_s": idle_wait_s,
             "returncode": proc.returncode,
             "elapsed_s": round(time.perf_counter() - started, 3),
@@ -585,6 +661,7 @@ def main() -> int:
     parser.add_argument("--final-artifacts", action="store_true")
     parser.add_argument("--train-quant-forward", action="store_true")
     parser.add_argument("--roundtrip-guard", action="store_true")
+    parser.add_argument("--allow-over-cap", action="store_true")
     parser.add_argument("--quant-train-every", type=int, default=100)
     parser.add_argument("--wait-for-idle-gpu", action="store_true")
     parser.add_argument("--idle-max-util", type=int, default=15)
@@ -614,6 +691,7 @@ def main() -> int:
         train_quant_forward=args.train_quant_forward,
         quant_train_every=args.quant_train_every,
         roundtrip_guard=args.roundtrip_guard,
+        allow_over_cap=args.allow_over_cap,
         wait_for_idle=args.wait_for_idle_gpu,
         idle_max_util=args.idle_max_util,
         idle_max_memory_mib=args.idle_max_memory_mib,
