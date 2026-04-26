@@ -8,15 +8,19 @@ do they cost, and what have we already learned?"
 
 The short current read:
 
-- Best clean legal sub-4MB local row:
+- Best fixed-step clean sub-4MB local row:
+  `i5l5r9_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12`, final export
+  `2.5608` BPB, `188.33ms/step`, `3,882,787` bytes.
+- Best local 10-minute wall-clock sub-4MB row:
   `i3l3r3_d768e256_q884_coret_lqer_r6t12`, final export `2.5749` BPB,
   `148.36ms/step`, `3,967,875` bytes.
-- Best soft-cap sub-4MB quality row:
-  `i3l3r3_d768e256_q884_coret_lqer_r6`, final export `2.5505` BPB,
-  `4,035,469` bytes, about `35KB` over the decimal 4MB goal.
-- Best i5/l5 precision ladder row so far:
-  `i5l5r2_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12`, final export
-  `2.9888` BPB, `124.29ms/step`.
+- Best soft-target sub-4MB quality row:
+  `i5l9r5_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12`, final export
+  `2.5314` BPB, `201.89ms/step`, `4,105,939` bytes, about `106KB` over the
+  decimal 4MB target.
+- Latest deeper-repeat i5/l9 row:
+  `i5l9r9_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12`, final export
+  `2.5731` BPB, `269.01ms/step`, `4,083,767` bytes.
 - Local sub-16 q6 proof baseline:
   `loopplain5k_i3l3r3_q6proof`, final export `1.7567` BPB,
   `9,268,177` bytes.
@@ -83,13 +87,17 @@ Upside:
 
 Cost/risk:
 
-- Soft-cap rows are not legal by default. They are quality references.
+- The official competition cap is still the real hard cap for submissions.
+- In this repo, the sub-4MB lane is a research target. Slightly-over rows are
+  still important if they improve quality or identify a better architecture.
 
 Current read:
 
-- q884 `r6` is the best soft-cap quality reference at `2.5505` BPB but about
-  `35KB` over the sub-4 goal.
-- q884 `r6t12` is the current clean legal sub-4 row at `2.5749` BPB.
+- `i5l9r5` is the best current soft-target quality reference at `2.5314` BPB,
+  about `106KB` over the sub-4 target.
+- `i5l5r9` is the best clean fixed-step row at `2.5608` BPB.
+- q884 `r6t12` remains the best tested 10-minute local wall-clock row at
+  `2.5749` BPB.
 
 ### Fixed-Step Versus Wall-Clock Comparison
 
@@ -261,11 +269,12 @@ Cost/risk:
 
 Current read:
 
-- q884 r3 is strong.
+- q884 r3 is strong under wall-clock.
 - q884 r9 with loop index improved over q884 r9 without loop index, but both
   were far behind q884 r3 under 10-minute local wall-clock.
-- i5/l5 r2 was better than r1/r3 under wall-clock; r9 is now being tested at
-  fixed 5k steps.
+- i5/l5 r9 is much better than r2 at fixed 5k steps.
+- i5/l9 r5 beat i5/l5 r9 at the same 55 virtual layers, but i5/l9 r9 was worse
+  and slower than r5.
 
 ### Loop Index
 
@@ -450,9 +459,10 @@ Cost/risk:
 
 Current read:
 
-- q884 IO tail with ternary core is the strongest local sub-4 quality family.
-- q16/q8/q4/q2/ternary i5/l5 is implemented correctly but d512/e192 was too
-  small to compete.
+- q884 IO tail with ternary core is still the strongest local 10-minute
+  wall-clock family.
+- q16/q8/q4/q2/ternary i5 routes are the strongest fixed-step/soft-target
+  quality family so far.
 
 ### Ternary Core
 
@@ -1547,12 +1557,14 @@ Current read:
 - Current promoted legal family.
 - Improve by shaving soft-cap row, widening carefully, or retuning LQER.
 
-### Precision Ladder i5/l5 Family
+### Precision Ladder i5 Family
 
 Examples:
 
 - `i5l5r2_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12`
 - `i5l5r9_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12`
+- `i5l9r5_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12`
+- `i5l9r9_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12`
 
 Use when:
 
@@ -1562,7 +1574,11 @@ Use when:
 Current read:
 
 - Correctly implemented from step one.
-- d512/e192 is under-capacity; loop index helps this family.
+- Loop index helps this family.
+- `i5l5r9` is the best clean fixed-step sub-4 row so far.
+- `i5l9r5` is the best soft-target quality row so far.
+- `i5l9r9` shows that more repeats can overdo the route: it was slower and
+  worse than r5.
 
 ### i6/l9 Deep IO Tail
 
@@ -1601,12 +1617,16 @@ Do not promote these without new evidence:
 
 ### If The Goal Is Better Sub-4 Quality
 
-1. Start from `i3l3r3_d768e256_q884_coret_lqer_r6t12`.
-2. Try to shave the soft-cap `r6` row below 4MB.
-3. Spend bytes on capacity or LQER, not unused headroom.
-4. Keep `TRAIN_QUANT_FORWARD=1`.
-5. Use CaseOps/SP8192 and final export BPB.
-6. Test loop index only if route depth is high enough to justify it.
+1. Start from `i5l9r5_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12` for
+   fixed-step quality exploration.
+2. Start from `i3l3r3_d768e256_q884_coret_lqer_r6t12` for local 10-minute
+   wall-clock comparison.
+3. Treat 4MB as a target for this experimental lane; keep slightly-over rows if
+   they reveal a better architecture.
+4. Spend bytes on capacity or LQER, not unused headroom.
+5. Keep `TRAIN_QUANT_FORWARD=1`.
+6. Use CaseOps/SP8192 and final export BPB.
+7. Test loop index only if route depth is high enough to justify it.
 
 ### If The Goal Is More Sub-4 Speed
 
@@ -1644,11 +1664,12 @@ Do not promote these without new evidence:
 
 ## Current Best Next Bets
 
-1. Finish the fixed-5k loop-index comparison and use it to separate per-step
-   quality from wall-clock speed.
-2. Improve the q884 r3 legal row or shave the q884 `r6` soft-cap row.
-3. Run the d1536/e384 and d2048/e512 H100 capacity ladder with export-honest
+1. Run a 10-minute wall-clock comparison between `i5l9r5`, `i5l5r9`, and the
+   q884 r3 wall-clock anchor.
+2. Explore i5/l9 size/quality tweaks around r5 rather than adding more repeats.
+3. Improve the q884 r3 legal row or shave the q884 `r6` soft-cap row.
+4. Run the d1536/e384 and d2048/e512 H100 capacity ladder with export-honest
    train-time quant.
-4. Resume sub-16 LQER/frozen-carry/publicstack after the corrected carry block
+5. Resume sub-16 LQER/frozen-carry/publicstack after the corrected carry block
    selector.
-5. Build the safe tokenizer sweep only with exact byte accounting.
+6. Build the safe tokenizer sweep only with exact byte accounting.

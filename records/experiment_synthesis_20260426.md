@@ -9,16 +9,25 @@ engineering interpretation.
 ## Current State
 
 - No local training/matrix process was active during this audit.
-- The strongest clean sub-4MB local candidate is
+- The strongest clean sub-4MB fixed-step local candidate is now
+  `i5l5r9_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12`: final export
+  `2.5608` BPB, `188.33ms/step`, `3,882,787` bytes, and `117,213` bytes of
+  decimal 4MB headroom at 5k steps.
+- The best 10-minute local wall-clock row remains
   `i3l3r3_d768e256_q884_coret_lqer_r6t12`: final export `2.5749` BPB,
   `148.36ms/step`, `4046` wall-clock-stop steps, `3,967,875` bytes, and
   `32,125` bytes of decimal 4MB headroom.
-- The best quality q884 row is slightly over the soft 4MB goal:
+- The best soft-target sub-4 quality reference is now
+  `i5l9r5_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12`: final export `2.5314`
+  BPB, `201.89ms/step`, `4,105,939` bytes, `105,939` bytes over the decimal
+  4MB target. This compares against `i5l5r9` at the same 55 virtual layers and
+  5k steps, so the difference is more unique loop blocks and fewer repeats.
+- The best quality q884 row is slightly over the 4MB target:
   `i3l3r3_d768e256_q884_coret_lqer_r6` reached `2.5505` BPB at
   `4,035,469` bytes, `35,469` bytes over cap.
-- The i5/l5 q16/q8/q4/q2/ternary ladder is legal and fast, but too small:
-  best row `i5l5r2_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12` reached
-  `2.9888` BPB at `124.29ms/step`.
+- The i5 q16/q8/q4/q2/ternary ladder is no longer just a small speed lane:
+  `i5l5r9` is the clean legal quality leader at fixed 5k steps, while
+  `i5l9r5` is the strongest soft-cap quality row.
 - The r9 loop-index test proved the loop index can help under high recurrence:
   r9 with loop index beat no-loop-index by `0.0455` BPB. But r9 was too slow
   locally, around `211-215ms/step`, and finished far behind q884 r3.
@@ -40,7 +49,9 @@ engineering interpretation.
   including TernaryLinear sidecars instead of being folded into weights that
   would be re-ternarized.
 - Decimal cap and codec discipline: sub-4 runs use
-  `SUBMISSION_SIZE_CAP_BYTES=4000000` and prefer `MODEL_CODEC=lzma`.
+  `SUBMISSION_SIZE_CAP_BYTES=4000000` and prefer `MODEL_CODEC=lzma`. For this
+  project, sub-4MB is a research target rather than the competition hard cap;
+  slightly-over rows remain useful quality references.
 - Precision policy expansion: `train_gpt.py` now supports q2 and q16/fp16
   passthrough in the train-time/export policy.
 - Local speed hygiene: fused QKV, fp16 Muon state where stable, no grad scaler
@@ -61,17 +72,22 @@ engineering interpretation.
    serious lane.
 
 2. Width and byte spending beat extreme recurrence locally.
-   The q884 r3 row is much better than r9, even though r9 reuses parameters
-   more aggressively. More tied depth reduces step count too much on the 2060.
+   The q884 r3 row is much better than q884 r9, even though r9 reuses
+   parameters more aggressively. However, the i5 precision-ladder family shows
+   that deep virtual routes can work when the IO ladder and loop-index signal
+   match the route.
 
 3. Loop index is conditional, not universally good.
    It hurt the q884 r3 legal row, helped every i5/l5 row, and helped r9. The
    signal is real, but it is only worth paying for when the loop repeats enough
    or when the route is otherwise ambiguous.
 
-4. The i5/l5 precision ladder is correctly implemented but under-capacity.
-   q16/q8/q4/q2/ternary from step one works, and r2+lidx was best, but d512/e192
-   cannot match d768/e256 q884 quality.
+4. The i5 precision ladder is now a promoted sub-4 direction.
+   q16/q8/q4/q2/ternary from step one works. At equal 55 virtual layers and 5k
+   steps, `i5l9r5` beat `i5l5r9` by `0.0294` final BPB, but it needs about
+   `106KB` shaved to fit the decimal 4MB target. Pushing the same `i5l9`
+   physical shape from r5 to r9 worsened quality to `2.5731` BPB and slowed to
+   `269.01ms/step`, so more repeats are not automatically better.
 
 5. LQER rank/top-K are real byte-quality knobs; factor bits were not.
    In the asymmetric LQER path, `LQER_FACTOR_BITS` does not save bytes. Rank and
@@ -103,18 +119,23 @@ engineering interpretation.
 
 ## Current Promotion Order
 
-1. Legal sub-4 default: `i3l3r3_d768e256_q884_coret_lqer_r6t12`.
-2. Soft-cap quality reference: `i3l3r3_d768e256_q884_coret_lqer_r6`.
-3. If we spend more local time: widen or improve q884 r3 before adding more
-   repeats.
-4. If we get H100 time: run d1536/e384 and d2048/e512 CaseOps/HRC capacity
+1. Fixed-step legal sub-4 default:
+   `i5l5r9_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12`.
+2. Local 10-minute wall-clock default:
+   `i3l3r3_d768e256_q884_coret_lqer_r6t12`.
+3. Soft-target quality reference:
+   `i5l9r5_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12`.
+4. If we spend more local time: keep `i5l9r5` as the quality reference even if
+   slightly over 4MB, then run a 10-minute wall-clock comparison against q884
+   r3 and i5l5r9.
+5. If we get H100 time: run d1536/e384 and d2048/e512 CaseOps/HRC capacity
    ladders with the same export-honest train-time quant policy.
-5. For sub-16: resume q6 proof with LQER/frozen-carry/publicstack and then test
+6. For sub-16: resume q6 proof with LQER/frozen-carry/publicstack and then test
    speed levers only if the loss curve tracks the conservative baseline.
 
-## Active Fixed-Step Follow-Up
+## Fixed-Step Follow-Ups
 
-Started 2026-04-26:
+Started/completed 2026-04-26:
 `records/sub4-lidx-fixed5k-depthcompare-20260426-010314`.
 
 Purpose: compare high-recurrence loop-index rows at the same 5k train-step
@@ -129,3 +150,39 @@ Rows:
 Settings: `ITERATIONS=5000`, `MAX_WALLCLOCK_SECONDS=0`,
 `WARMDOWN_ITERS=5000`, `TRAIN_QUANT_FORWARD=1`, final artifacts,
 `--allow-over-cap`, idle GPU guard, and loop index enabled on all rows.
+
+Results:
+
+- `i5l5r9_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12`: final export
+  `2.5608` BPB, `188.33ms/step`, `3,882,787` bytes.
+- `i5l5r2_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12`: final export
+  `3.2888` BPB, `126.33ms/step`, `3,871,503` bytes.
+- `i3l3r9_d768e256_q884_coret_lqer_lidx_r6t12`: final export `3.6462` BPB,
+  `224.62ms/step`, `3,738,987` bytes.
+
+Follow-up:
+`records/sub4-i5l9r5-fixed5k-20260426-015555`.
+
+Purpose: compare `i5l5r9` against `i5l9r5` at the same 55 virtual layers and
+5k train-step budget. The new row has more unique loop blocks but fewer loop
+repeats.
+
+Result:
+
+- `i5l9r5_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12`: final export `2.5314`
+  BPB, `201.89ms/step`, `4,105,939` bytes, `105,939` bytes over the decimal
+  4MB target.
+
+Follow-up:
+`records/sub4-i5l9r9-fixed5k-20260426-021633`.
+
+Purpose: test whether the same `i5l9` physical shape improves with more loop
+repeats. This raises effective depth from 55 to 91 without changing the unique
+block count.
+
+Result:
+
+- `i5l9r9_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12`: final export `2.5731`
+  BPB, `269.01ms/step`, `4,083,767` bytes, `83,767` bytes over the decimal
+  4MB target. This is worse and slower than r5, so r5 is the better tested
+  repeat count for the i5/l9 physical shape.
