@@ -51,6 +51,12 @@ TRAIN_PATTERNS = {
     "train_loss": re.compile(rf"step:\d+/\d+ train_loss:{FLOAT_VALUE}"),
     "val_loss": re.compile(rf"val_loss:{FLOAT_VALUE}"),
     "val_bpb": re.compile(rf"val_bpb:{FLOAT_VALUE}"),
+    "final_ttt_val_loss": re.compile(rf"final_score_first_ttt val_loss:{FLOAT_VALUE}"),
+    "final_ttt_val_bpb": re.compile(rf"final_score_first_ttt val_loss:{FLOAT_VALUE_RAW} val_bpb:{FLOAT_VALUE}"),
+    "final_quant_ttt_val_loss": re.compile(rf"final_int8_score_first_ttt val_loss:{FLOAT_VALUE}"),
+    "final_quant_ttt_val_bpb": re.compile(
+        rf"final_int8_score_first_ttt val_loss:{FLOAT_VALUE_RAW} val_bpb:{FLOAT_VALUE}"
+    ),
     "final_export_val_loss": re.compile(rf"final_export_roundtrip val_loss:{FLOAT_VALUE}"),
     "final_export_val_bpb": re.compile(rf"final_export_roundtrip val_loss:{FLOAT_VALUE_RAW} val_bpb:{FLOAT_VALUE}"),
     "artifact_model_bytes": re.compile(r"Serialized model int\d+(?:/ternary\d+)?(?:/lqer\d+)?\+\w+: (?P<value>\d+) bytes"),

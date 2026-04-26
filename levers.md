@@ -27,6 +27,19 @@ The short current read:
 - Local sub-16 q6 proof baseline:
   `loopplain5k_i3l3r3_q6proof`, final export `1.7567` BPB,
   `9,268,177` bytes.
+- Active quality-first i4/l9/r5 update:
+  `records/sub4-quality-first-i4-5k-20260426-034039` is still running. The
+  best completed interim row is
+  `i4l9r5_d768e320_q16q8q4t_lqer_lidx_r8t16`, final export `2.4962` BPB,
+  `273.78ms/step`, `7,868,221` bytes. The faster
+  `i4l9r5_d640e256_q16q8q4t_lqer_lidx_r8t16` is close at `2.4983` BPB and
+  `227.55ms/step`, so the next local lever matrix uses d640/e256 for most
+  controls and keeps d768/e320 as a width check.
+- Next prepared matrix group:
+  `sub4_leader_levers` in `scripts/run_sub4_iotail_quant_matrix.py`, covering
+  QK gain, scalar SmearGate, attention-output gates, sparse attention gates,
+  Huber Muon decay, parallel residuals, frozen recurrent carry, score-first
+  TTT, and a conservative stacked public-style row.
 
 ## How To Read This
 
@@ -40,6 +53,62 @@ Each lever has:
 
 Use the current promoted rows as anchors. A lever is only promoted if it wins
 under final artifact round-trip, not only train-time loss.
+
+## 2026-04-26 Leaderboard-Inspired Addendum
+
+Goal: fold current public competition ideas into our HRC/IO-tail search without
+copying a whole late-stage transformer stack blindly.
+
+Sources:
+
+- Official README leaderboard:
+  <https://github.com/openai/parameter-golf>
+- merged PR #1493:
+  <https://github.com/openai/parameter-golf/pull/1493>
+- open PR #1790:
+  <https://github.com/openai/parameter-golf/pull/1790>
+- open PR #1791:
+  <https://github.com/openai/parameter-golf/pull/1791>
+- open PR #1797:
+  <https://github.com/openai/parameter-golf/pull/1797>
+- open tokenizer-normalization policy issue #1604:
+  <https://github.com/openai/parameter-golf/issues/1604>
+
+Current read:
+
+- The accepted leaderboard is still an SP8192 transformer family: recurrence,
+  QK gain, parallel residuals, GPTQ/SDClip, and legal score-first TTT.
+- Public open PRs suggest the frontier moved further with SmearGate,
+  attention-output gating, phased/LoRA TTT, LQER-style quant repair, and larger
+  FLA/GDN pivots.
+- For our sub-4/soft-8 lane, the safe immediate move is not a full architecture
+  rewrite. It is to test cheap control levers on the best local IO-tail shape.
+- CaseOps remains useful empirically, but normalization policy is still an
+  explicit review surface. Keep exact byte sidecars and treat tokenizer changes
+  as audit-heavy.
+
+Implemented for the next local matrix:
+
+- `QK_GAIN_INIT` sweep: `5.0`, `5.25`, `5.5`.
+- `SMEAR_GATE_ENABLED=1`, `SMEAR_GATE_MODE=scalar`.
+- `ATTN_OUT_GATE_ENABLED=1`, width `24`.
+- `SPARSE_ATTN_GATE_ENABLED=1`, width `12`, mutually exclusive with
+  attention-output gate.
+- `MUON_WEIGHT_DECAY=0.095`, `MUON_WEIGHT_DECAY_MODE=huber`.
+- `PARALLEL_RESIDUAL_LAST_N=4` and `8` with the residual mixer enabled.
+- `HRC_FROZEN_CARRY_ENABLED=1` on repeated core blocks `4,5,6` so the existing
+  3x3 carry coefficients are valid for i4/l9.
+- `TTT_SCORE_FIRST_ENABLED=1` control-only legal eval probe at LR `0.005`,
+  max `24` updates.
+
+Not yet implemented as drop-in local levers:
+
+- Full Hessian-aware SDClip/GPTQ calibration for this ternary export path.
+- Progressive recurrence activation during training. We can approximate it with
+  route/repeat sweeps today, but a true schedule would need trainer work.
+- Full LoRA/phased TTT from the public transformer lane.
+- FLA/GatedDeltaNet and byte-level PPM mixture. These should be separate
+  branches because they change the predictor class and review profile.
 
 ## Measurement And Legality Levers
 

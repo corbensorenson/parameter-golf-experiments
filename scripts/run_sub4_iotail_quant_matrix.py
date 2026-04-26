@@ -216,6 +216,7 @@ def quality_i4_candidate(
     lqer_rank: int = 8,
     lqer_top_k: int = 16,
     attention_mode: str = "mlp",
+    extra_env: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     io_width = 4
     env = route_env(
@@ -236,12 +237,86 @@ def quality_i4_candidate(
         env["QUANT_TERNARY_PATTERNS"] = ""
     env.update(lqer_env(rank=lqer_rank, top_k=lqer_top_k))
     env.update(loop_index_env(dim=32, scale_init=0.03))
+    if extra_env:
+        env.update({key: str(value) for key, value in extra_env.items()})
     return {
         "name": name,
         "base_profile": quality_base_profile(model_dim, embed_dim),
         "preset": "2060sprint_micro_muon_cooltaper5k_cold_tokens8k",
         "env": env,
     }
+
+
+def qk_gain_env(value: float) -> dict[str, str]:
+    return {"QK_GAIN_INIT": str(float(value))}
+
+
+def smear_gate_env(width: int = 12) -> dict[str, str]:
+    return {
+        "SMEAR_GATE_ENABLED": "1",
+        "SMEAR_GATE_WIDTH": str(width),
+        "SMEAR_GATE_MODE": "scalar",
+    }
+
+
+def attn_out_gate_env(width: int = 24) -> dict[str, str]:
+    return {
+        "ATTN_OUT_GATE_ENABLED": "1",
+        "ATTN_OUT_GATE_WIDTH": str(width),
+        "SPARSE_ATTN_GATE_ENABLED": "0",
+    }
+
+
+def sparse_attn_gate_env(width: int = 12) -> dict[str, str]:
+    return {
+        "SPARSE_ATTN_GATE_ENABLED": "1",
+        "ATTN_OUT_GATE_WIDTH": str(width),
+        "SPARSE_ATTN_GATE_INIT_STD": "0.0",
+        "SPARSE_ATTN_GATE_SCALE": "1.0",
+        "ATTN_OUT_GATE_ENABLED": "0",
+    }
+
+
+def huber_muon_wd_env(weight_decay: float = 0.095) -> dict[str, str]:
+    return {
+        "MUON_WEIGHT_DECAY": str(float(weight_decay)),
+        "MUON_WEIGHT_DECAY_MODE": "huber",
+        "MUON_WEIGHT_DECAY_HUBER_DELTA_SCALE": "3.0",
+    }
+
+
+def parallel_residual_env(last_n: int) -> dict[str, str]:
+    return {
+        "PARALLEL_RESIDUAL_LAST_N": str(int(last_n)),
+        "RESIDUAL_MIXER_ENABLED": "1",
+    }
+
+
+def frozen_carry_env(detach: bool = True, blocks: str = "4,5,6") -> dict[str, str]:
+    return {
+        "HRC_FROZEN_CARRY_ENABLED": "1",
+        "HRC_FROZEN_CARRY_BLOCKS": blocks,
+        "HRC_FROZEN_CARRY_DETACH": "1" if detach else "0",
+    }
+
+
+def score_first_ttt_env(lr: float = 0.005, max_updates: int = 24) -> dict[str, str]:
+    return {
+        "TTT_SCORE_FIRST_ENABLED": "1",
+        "TTT_SCORE_FIRST_PARAM_MODE": "control",
+        "TTT_SCORE_FIRST_OPTIMIZER": "sgd",
+        "TTT_SCORE_FIRST_LR": str(float(lr)),
+        "TTT_SCORE_FIRST_WEIGHT_DECAY": "0.0",
+        "TTT_SCORE_FIRST_GRAD_CLIP": "1.0",
+        "TTT_SCORE_FIRST_MAX_UPDATES": str(int(max_updates)),
+    }
+
+
+def merge_env(*parts: dict[str, str]) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for part in parts:
+        out.update(part)
+    return out
 
 
 CANDIDATES: list[dict[str, Any]] = [
@@ -1032,10 +1107,133 @@ CANDIDATES: list[dict[str, Any]] = [
 ]
 
 
-def selected_candidates(raw: str) -> list[dict[str, Any]]:
-    if not raw:
+LEADER_LEVER_CANDIDATES: list[dict[str, Any]] = [
+    quality_i4_candidate(
+        "i4l9r5_d640e256_q16q8q4t_qk500_lqer_lidx_r8t16",
+        model_dim=640,
+        embed_dim=256,
+        extra_env=qk_gain_env(5.0),
+    ),
+    quality_i4_candidate(
+        "i4l9r5_d640e256_q16q8q4t_qk525_lqer_lidx_r8t16",
+        model_dim=640,
+        embed_dim=256,
+        extra_env=qk_gain_env(5.25),
+    ),
+    quality_i4_candidate(
+        "i4l9r5_d640e256_q16q8q4t_qk550_lqer_lidx_r8t16",
+        model_dim=640,
+        embed_dim=256,
+        extra_env=qk_gain_env(5.5),
+    ),
+    quality_i4_candidate(
+        "i4l9r5_d640e256_q16q8q4t_smear_lqer_lidx_r8t16",
+        model_dim=640,
+        embed_dim=256,
+        extra_env=smear_gate_env(width=12),
+    ),
+    quality_i4_candidate(
+        "i4l9r5_d640e256_q16q8q4t_attnout24_lqer_lidx_r8t16",
+        model_dim=640,
+        embed_dim=256,
+        extra_env=attn_out_gate_env(width=24),
+    ),
+    quality_i4_candidate(
+        "i4l9r5_d640e256_q16q8q4t_sparsegate_lqer_lidx_r8t16",
+        model_dim=640,
+        embed_dim=256,
+        extra_env=sparse_attn_gate_env(width=12),
+    ),
+    quality_i4_candidate(
+        "i4l9r5_d640e256_q16q8q4t_huberwd095_lqer_lidx_r8t16",
+        model_dim=640,
+        embed_dim=256,
+        extra_env=huber_muon_wd_env(0.095),
+    ),
+    quality_i4_candidate(
+        "i4l9r5_d640e256_q16q8q4t_parres4_lqer_lidx_r8t16",
+        model_dim=640,
+        embed_dim=256,
+        extra_env=parallel_residual_env(last_n=4),
+    ),
+    quality_i4_candidate(
+        "i4l9r5_d640e256_q16q8q4t_parres8_lqer_lidx_r8t16",
+        model_dim=640,
+        embed_dim=256,
+        extra_env=parallel_residual_env(last_n=8),
+    ),
+    quality_i4_candidate(
+        "i4l9r5_d640e256_q16q8q4t_fcarry_lqer_lidx_r8t16",
+        model_dim=640,
+        embed_dim=256,
+        extra_env=frozen_carry_env(detach=True),
+    ),
+    quality_i4_candidate(
+        "i4l9r5_d640e256_q16q8q4t_tttctrl005u24_lqer_lidx_r8t16",
+        model_dim=640,
+        embed_dim=256,
+        extra_env=score_first_ttt_env(lr=0.005, max_updates=24),
+    ),
+    quality_i4_candidate(
+        "i4l9r5_d640e256_q16q8q4t_qk525_smear_lqer_lidx_r8t16",
+        model_dim=640,
+        embed_dim=256,
+        extra_env=merge_env(qk_gain_env(5.25), smear_gate_env(width=12)),
+    ),
+    quality_i4_candidate(
+        "i4l9r5_d640e256_q16q8q4t_qk525_attnout24_lqer_lidx_r8t16",
+        model_dim=640,
+        embed_dim=256,
+        extra_env=merge_env(qk_gain_env(5.25), attn_out_gate_env(width=24)),
+    ),
+    quality_i4_candidate(
+        "i4l9r5_d640e256_q16q8q4t_qk525_huberwd_lqer_lidx_r8t16",
+        model_dim=640,
+        embed_dim=256,
+        extra_env=merge_env(qk_gain_env(5.25), huber_muon_wd_env(0.095)),
+    ),
+    quality_i4_candidate(
+        "i4l9r5_d640e256_q16q8q4t_publicsafe_lqer_lidx_r8t16",
+        model_dim=640,
+        embed_dim=256,
+        extra_env=merge_env(
+            qk_gain_env(5.25),
+            smear_gate_env(width=12),
+            huber_muon_wd_env(0.095),
+            parallel_residual_env(last_n=4),
+            frozen_carry_env(detach=True),
+        ),
+    ),
+    quality_i4_candidate(
+        "i4l9r5_d768e320_q16q8q4t_qk525_lqer_lidx_r8t16",
+        model_dim=768,
+        embed_dim=320,
+        extra_env=qk_gain_env(5.25),
+    ),
+    quality_i4_candidate(
+        "i4l9r5_d768e320_q16q8q4t_smear_lqer_lidx_r8t16",
+        model_dim=768,
+        embed_dim=320,
+        extra_env=smear_gate_env(width=12),
+    ),
+]
+
+CANDIDATES.extend(LEADER_LEVER_CANDIDATES)
+
+CANDIDATE_GROUPS: dict[str, list[str]] = {
+    "sub4_leader_levers": [candidate["name"] for candidate in LEADER_LEVER_CANDIDATES],
+}
+
+
+def selected_candidates(raw: str, groups: list[str] | None = None) -> list[dict[str, Any]]:
+    wanted: set[str] = set()
+    for group in groups or []:
+        if group not in CANDIDATE_GROUPS:
+            raise ValueError(f"unknown candidate group {group!r}; known groups: {', '.join(sorted(CANDIDATE_GROUPS))}")
+        wanted.update(CANDIDATE_GROUPS[group])
+    if not raw and not wanted:
         return CANDIDATES
-    wanted = {item.strip() for item in raw.replace(";", ",").split(",") if item.strip()}
+    wanted.update({item.strip() for item in raw.replace(";", ",").split(",") if item.strip()})
     out = [candidate for candidate in CANDIDATES if candidate["name"] in wanted]
     missing = wanted - {candidate["name"] for candidate in out}
     if missing:
@@ -1200,6 +1398,32 @@ def run_matrix(
     return rows
 
 
+CONTROL_PLAN_KEYS = (
+    "QK_GAIN_INIT",
+    "SMEAR_GATE_ENABLED",
+    "SMEAR_GATE_WIDTH",
+    "SMEAR_GATE_MODE",
+    "ATTN_OUT_GATE_ENABLED",
+    "ATTN_OUT_GATE_WIDTH",
+    "SPARSE_ATTN_GATE_ENABLED",
+    "MUON_WEIGHT_DECAY",
+    "MUON_WEIGHT_DECAY_MODE",
+    "PARALLEL_RESIDUAL_LAST_N",
+    "RESIDUAL_MIXER_ENABLED",
+    "HRC_FROZEN_CARRY_ENABLED",
+    "HRC_FROZEN_CARRY_BLOCKS",
+    "HRC_FROZEN_CARRY_DETACH",
+    "TTT_SCORE_FIRST_ENABLED",
+    "TTT_SCORE_FIRST_LR",
+    "TTT_SCORE_FIRST_MAX_UPDATES",
+)
+
+
+def control_plan_summary(env: dict[str, str]) -> str:
+    items = [f"{key}={env[key]}" for key in CONTROL_PLAN_KEYS if key in env]
+    return "`" + ", ".join(items) + "`" if items else "none"
+
+
 def write_candidate_plan(out_dir: Path, candidates: list[dict[str, Any]], iterations: int) -> None:
     lines = [
         "# Sub-4MB IO-Tail Quant Matrix",
@@ -1207,8 +1431,8 @@ def write_candidate_plan(out_dir: Path, candidates: list[dict[str, Any]], iterat
         f"Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}",
         f"Iterations: {iterations}",
         "",
-        "| Candidate | Route | IO Quant | Core Quant | Base |",
-        "|---|---|---|---|---|",
+        "| Candidate | Route | IO Quant | Core Quant | Controls | Base |",
+        "|---|---|---|---|---|---|",
     ]
     for candidate in candidates:
         env = candidate["env"]
@@ -1221,6 +1445,7 @@ def write_candidate_plan(out_dir: Path, candidates: list[dict[str, Any]], iterat
                     f"start={env['HRC_RECURSIVE_CORE_START']} repeats={env['HRC_ROUTE_REPEATS']}",
                     f"`{env['QUANT_BITS_OVERRIDES']}`",
                     f"`{env['QUANT_TERNARY_PATTERNS']}`",
+                    control_plan_summary(env),
                     f"`{candidate['base_profile']}`",
                 ]
             )
@@ -1239,14 +1464,18 @@ def write_summary(out_dir: Path, rows: list[dict[str, object]]) -> None:
     good = [row for row in rows if row.get("returncode") == 0 and "val_bpb" in row]
 
     def key(row: dict[str, object]) -> float:
-        return float(row.get("final_export_val_bpb", row.get("val_bpb", 999.0)))
+        return float(row.get("final_quant_ttt_val_bpb", row.get("final_export_val_bpb", row.get("val_bpb", 999.0))))
 
     for row in sorted(good, key=key):
-        score = (
-            f"final_bpb={row['final_export_val_bpb']}"
-            if "final_export_val_bpb" in row
-            else f"val_bpb={row['val_bpb']}"
-        )
+        if "final_quant_ttt_val_bpb" in row:
+            score = (
+                f"final_ttt_bpb={row['final_quant_ttt_val_bpb']}, "
+                f"final_bpb={row.get('final_export_val_bpb', 'n/a')}"
+            )
+        elif "final_export_val_bpb" in row:
+            score = f"final_bpb={row['final_export_val_bpb']}"
+        else:
+            score = f"val_bpb={row['val_bpb']}"
         lines.append(
             f"- `{row['candidate']}`: {score}, train_val={row.get('val_bpb')}, "
             f"step_avg={row.get('step_avg_ms')}ms, bytes={row.get('artifact_total_bytes', 'n/a')}, "
@@ -1266,6 +1495,7 @@ def main() -> int:
     parser.add_argument("--val-tokens", type=int, default=65536)
     parser.add_argument("--timeout", type=int, default=1800)
     parser.add_argument("--candidates", default="")
+    parser.add_argument("--candidate-group", action="append", default=[])
     parser.add_argument("--final-artifacts", action="store_true")
     parser.add_argument("--train-quant-forward", action="store_true")
     parser.add_argument("--roundtrip-guard", action="store_true")
@@ -1279,7 +1509,7 @@ def main() -> int:
     parser.add_argument("--list", action="store_true")
     args = parser.parse_args()
 
-    candidates = selected_candidates(args.candidates)
+    candidates = selected_candidates(args.candidates, args.candidate_group)
     if args.list:
         for candidate in candidates:
             print(candidate["name"])

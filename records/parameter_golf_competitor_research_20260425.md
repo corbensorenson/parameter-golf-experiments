@@ -5,6 +5,8 @@ Date: 2026-04-25
 ## Sources Checked
 
 - OpenAI repo README / current leaderboard notes: <https://github.com/openai/parameter-golf>
+- PR #1493: <https://github.com/openai/parameter-golf/pull/1493>
+- PR #1790: <https://github.com/openai/parameter-golf/pull/1790>
 - PR #1797: <https://github.com/openai/parameter-golf/pull/1797>
 - PR #1801: <https://github.com/openai/parameter-golf/pull/1801>
 - PR #1809: <https://github.com/openai/parameter-golf/pull/1809>
@@ -12,6 +14,33 @@ Date: 2026-04-25
 - PR #1795: <https://github.com/openai/parameter-golf/pull/1795>
 - PR #1791: <https://github.com/openai/parameter-golf/pull/1791>
 - Submission rules / legality guide: <https://github.com/openai/parameter-golf/issues/1017>
+- Tokenizer normalization policy issue: <https://github.com/openai/parameter-golf/issues/1604>
+
+## 2026-04-26 Addendum
+
+The latest official README still lists the accepted leader as PR #1493:
+SP8192, 3-layer recurrence, parallel residuals, QK-Gain 5.25, and legal
+score-first TTT at `1.0810` BPB. The public PR queue points beyond that:
+PR #1790 reports a no-CaseOps SP8192 transformer line at `1.06991`, PR #1797
+reports a CaseOps/SmearGate/LQER line at `1.06157`, PR #1791 reports a
+K/KV-share FLA line at `1.0339`, and PR #1795 reports a byte-level PPM mixture
+at `1.01252` with explicit legality-review risk.
+
+The practical take for this repo is:
+
+- Use public transformer knobs as cheap local HRC levers first: QK gain,
+  SmearGate, attention-output gates, sparse attention gates, parallel
+  residuals, Huber Muon decay, frozen carry, and legal score-first TTT.
+- Keep CaseOps because our current data path is exact-byte sidecar based, but
+  treat tokenizer normalization as policy-sensitive because issue #1604 is
+  still open.
+- Do not blur the lanes: FLA/GDN and PPM are real upside, but they are separate
+  predictor-class branches, not simple sub-4 IO-tail toggles.
+
+The prepared local follow-up matrix is documented in
+`records/leader_lever_matrix_20260426.md` and exposed as the
+`sub4_leader_levers` candidate group in
+`scripts/run_sub4_iotail_quant_matrix.py`.
 
 ## Current Public Target
 
