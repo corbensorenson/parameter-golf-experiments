@@ -586,3 +586,38 @@ Queued follow-up: the best q884 run did not enable
 position information. The trainer already supports a tiny sinusoidal loop-index
 control path, so the next pass should compare the baseline and best byte-shaved
 q884 rows with `HRC_LOOP_INDEX_ENABLED=1`, `HRC_LOOP_INDEX_DIM=32`.
+
+Completion:
+
+| Candidate | Final Export BPB | Step avg | Stop step | Bytes | Headroom |
+|---|---:|---:|---:|---:|---:|
+| `i3l3r3_d768e256_q884_coret_lqer_r6` | 2.5505 | 145.05 ms | 4138 | 4,035,469 | -35,469 |
+| `i3l3r3_d768e256_q884_coret_lqer_fb3` | 2.5634 | 145.06 ms | 4138 | 4,061,901 | -61,901 |
+| `i3l3r3_d768e256_q884_coret_lqer_t12` | 2.5779 | 150.76 ms | 3981 | 4,006,973 | -6,973 |
+| `i3l3r3_d768e256_q884_coret_lqer_t12fb3` | 2.6524 | 145.07 ms | 4138 | 4,033,585 | -33,585 |
+
+Read:
+
+- `r6` is the best quality row in this sweep and is only 35KB over the 4MB
+  goal. It is the new quality favorite for the q884 branch.
+- `t12` is the closest-to-legal row, only 6,973 bytes over, but gives up about
+  0.027 BPB versus `r6`.
+- `factor_bits=3` is not a real byte lever while asymmetric LQER is enabled.
+  The export path uses the asym int2/int4 factor layout when
+  `LQER_ASYM_ENABLED=1`, so `LQER_FACTOR_BITS` is only meaningful for the
+  symmetric fallback. Do not spend more matrix time on `fb3` in this lane.
+- The exact q884 baseline rerun crashed early with CUDA illegal memory access,
+  while the derived rows completed. Keep treating this as a local Windows/CUDA
+  stability issue unless it reproduces on Linux/H100.
+
+New follow-up candidates:
+
+- `i3l3r3_d768e256_q884_coret_lqer_t11`: shave the near-legal `t12` row below
+  cap with minimal expected quality loss.
+- `i3l3r3_d768e256_q884_coret_lqer_r6t14`: see whether most of the `r6`
+  quality can be kept while shaving bytes.
+- `i3l3r3_d768e256_q884_coret_lqer_r6t12`: likely first truly under-4MB row in
+  the higher-quality `r6` branch.
+- `i3l3r3_d768e256_q884_coret_lqer_lidx_t11` and
+  `i3l3r3_d768e256_q884_coret_lqer_lidx_r6t12`: test whether tiny loop-index
+  conditioning helps the looped middle once the byte budget is legal.

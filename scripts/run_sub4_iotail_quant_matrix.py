@@ -135,6 +135,9 @@ def route_env(
 
 
 def lqer_env(rank: int = 8, top_k: int = 16, factor_bits: int = 4) -> dict[str, str]:
+    # With LQER_ASYM_ENABLED=1, the exporter uses the asym int2/int4 factor
+    # layout; factor_bits only matters for the symmetric fallback. In this lane,
+    # rank and top_k are the real byte/quality knobs.
     return {
         "LQER_ENABLED": "1",
         "LQER_RANK": str(rank),
@@ -349,6 +352,60 @@ CANDIDATES: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "i3l3r3_d768e256_q884_coret_lqer_t11",
+        "base_profile": "i1l2r2_d768_e256_h12kv1_mlpinner_mlp075",
+        "preset": "2060sprint_micro_muon_cooltaper5k_cold_tokens8k",
+        "env": {
+            **route_env(
+                io_width=3,
+                loop_width=3,
+                repeats=3,
+                model_dim=768,
+                embed_dim=256,
+                heads=12,
+                mlp_mult=0.75,
+                io_quant=(8, 8, 4),
+            ),
+            **lqer_env(rank=8, top_k=11),
+        },
+    },
+    {
+        "name": "i3l3r3_d768e256_q884_coret_lqer_r6t14",
+        "base_profile": "i1l2r2_d768_e256_h12kv1_mlpinner_mlp075",
+        "preset": "2060sprint_micro_muon_cooltaper5k_cold_tokens8k",
+        "env": {
+            **route_env(
+                io_width=3,
+                loop_width=3,
+                repeats=3,
+                model_dim=768,
+                embed_dim=256,
+                heads=12,
+                mlp_mult=0.75,
+                io_quant=(8, 8, 4),
+            ),
+            **lqer_env(rank=6, top_k=14),
+        },
+    },
+    {
+        "name": "i3l3r3_d768e256_q884_coret_lqer_r6t12",
+        "base_profile": "i1l2r2_d768_e256_h12kv1_mlpinner_mlp075",
+        "preset": "2060sprint_micro_muon_cooltaper5k_cold_tokens8k",
+        "env": {
+            **route_env(
+                io_width=3,
+                loop_width=3,
+                repeats=3,
+                model_dim=768,
+                embed_dim=256,
+                heads=12,
+                mlp_mult=0.75,
+                io_quant=(8, 8, 4),
+            ),
+            **lqer_env(rank=6, top_k=12),
+        },
+    },
+    {
         "name": "i3l3r3_d768e256_q884_coret_lqer_lidx",
         "base_profile": "i1l2r2_d768_e256_h12kv1_mlpinner_mlp075",
         "preset": "2060sprint_micro_muon_cooltaper5k_cold_tokens8k",
@@ -383,6 +440,44 @@ CANDIDATES: list[dict[str, Any]] = [
                 io_quant=(8, 8, 4),
             ),
             **lqer_env(rank=8, top_k=12, factor_bits=3),
+            **loop_index_env(dim=32, scale_init=0.03),
+        },
+    },
+    {
+        "name": "i3l3r3_d768e256_q884_coret_lqer_lidx_t11",
+        "base_profile": "i1l2r2_d768_e256_h12kv1_mlpinner_mlp075",
+        "preset": "2060sprint_micro_muon_cooltaper5k_cold_tokens8k",
+        "env": {
+            **route_env(
+                io_width=3,
+                loop_width=3,
+                repeats=3,
+                model_dim=768,
+                embed_dim=256,
+                heads=12,
+                mlp_mult=0.75,
+                io_quant=(8, 8, 4),
+            ),
+            **lqer_env(rank=8, top_k=11),
+            **loop_index_env(dim=32, scale_init=0.03),
+        },
+    },
+    {
+        "name": "i3l3r3_d768e256_q884_coret_lqer_lidx_r6t12",
+        "base_profile": "i1l2r2_d768_e256_h12kv1_mlpinner_mlp075",
+        "preset": "2060sprint_micro_muon_cooltaper5k_cold_tokens8k",
+        "env": {
+            **route_env(
+                io_width=3,
+                loop_width=3,
+                repeats=3,
+                model_dim=768,
+                embed_dim=256,
+                heads=12,
+                mlp_mult=0.75,
+                io_quant=(8, 8, 4),
+            ),
+            **lqer_env(rank=6, top_k=12),
             **loop_index_env(dim=32, scale_init=0.03),
         },
     },
