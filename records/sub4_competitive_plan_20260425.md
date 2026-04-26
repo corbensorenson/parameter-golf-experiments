@@ -781,3 +781,37 @@ Queued matrix:
 - settings: 10-minute local wallclock per row, final artifacts,
   `TRAIN_QUANT_FORWARD=1`, `QUANT_TRAIN_MODE=none`, `--allow-over-cap`, idle
   guard, runner timeout `1200s` per row.
+
+Completion:
+
+### i5/l5 Precision Ladder
+
+| Candidate | Final Export BPB | Step avg | Stop step | Bytes | Headroom | Read |
+|---|---:|---:|---:|---:|---:|---|
+| `i5l5r2_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12` | 2.9888 | 124.29 ms | 4829 | 3,886,447 | 113,553 | Best i5/l5 row; loop index helped. |
+| `i5l5r1_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12` | 3.0068 | 119.25 ms | 5033 | 3,872,207 | 127,793 | Fastest useful lidx row. |
+| `i5l5r3_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12` | 3.1005 | 132.91 ms | 4516 | 3,879,015 | 120,985 | More repeats hurt. |
+| `i5l5r2_d512e192_q16q8q4q2t_coret_lqer_r6t12` | 3.1364 | 123.58 ms | 4856 | 3,881,023 | 118,977 | Worse than lidx twin. |
+| `i5l5r1_d512e192_q16q8q4q2t_coret_lqer_r6t12` | 3.1548 | 117.03 ms | 5128 | 3,885,607 | 114,393 | Fast and legal, but weak quality. |
+| `i5l5r3_d512e192_q16q8q4q2t_coret_lqer_r6t12` | 3.2832 | 131.06 ms | 4579 | 3,878,683 | 121,317 | Worst row. |
+
+Read: the precision ladder is legal and fast, and loop index helped every
+i5/l5 repeat count. But d512/e192 does not have enough capacity to compete
+with the d768 q884 r3 lane.
+
+### i3/l3/r9 Loop Index
+
+| Candidate | Final Export BPB | Step avg | Stop step | Bytes | Headroom | Read |
+|---|---:|---:|---:|---:|---:|---|
+| `i3l3r9_d768e256_q884_coret_lqer_lidx_r6t12` | 3.1062 | 215.12 ms | 2791 | 3,678,531 | 321,469 | Loop index helps r9 by 0.0455 BPB. |
+| `i3l3r9_d768e256_q884_coret_lqer_r6t12` | 3.1517 | 210.65 ms | 2850 | 3,697,363 | 302,637 | Too deep for local 10-minute quality. |
+
+Startup audit: the r9 logs show the intended route
+`0,1,2,3,4,5,3,4,5,3,4,5,3,4,5,3,4,5,3,4,5,3,4,5,3,4,5,3,4,5,2,1,0`,
+`TRAIN_QUANT_FORWARD=1`, q884 overrides for blocks `0,1,2`, and ternary
+training/export for blocks `3,4,5`.
+
+Read: r9 proves the loop index can help when repeats are high, but the extra
+virtual depth slows each step to about `211-215ms` and cuts the 10-minute run to
+only `2791-2850` steps. It does not beat the current promoted q884 r3 legal row:
+`2.5749` BPB at `148.36ms/step`.
