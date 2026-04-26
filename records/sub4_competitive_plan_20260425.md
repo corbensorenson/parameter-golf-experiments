@@ -402,21 +402,41 @@ Smoke checks:
 - `records/sub4-trainquant-q886-smoke-20260425`: more aggressive q8/q8/q6 IO
   tail, strict final reload clean and under 4MB.
 
-Active 10-minute wall-clock matrix:
+Superseded 10-minute wall-clock matrix:
 
 - record dir: `records/sub4-trainquant-wallclock10m-20260425-182043`
 - runner stdout: `logs/sub4-trainquant-wallclock10m-20260425-182043.out.txt`
 - settings: `TRAIN_QUANT_FORWARD=1`, `MAX_WALLCLOCK_SECONDS=600`,
   `QUANT_TRAIN_MODE=roundtrip`, `QUANT_TRAIN_EVERY=100`, final artifacts,
   decimal `SUBMISSION_SIZE_CAP_BYTES=4000000`.
-- rows:
-  - `i1l2r2_d768e256_q8_coret_lqer`
-  - `i1l2r2_d896e256_q8_coret_lqer`
-  - `i3l3r2_d768e256_q864_coret_lqer`
-  - `i3l3r3_d768e256_q864_coret_lqer`
-  - `i3l3r3_d768e256_q884_coret_lqer`
-  - `i3l3r3_d768e256_q886_coret_lqer`
+- result: invalid for clean train-time quant speed conclusions. It combined the
+  new STE forward path with the old periodic export/reload projection. The
+  shallow rows completed, but the deeper IO-tail rows crashed or timed out near
+  the projection path.
+- useful completed rows:
+  - `i1l2r2_d768e256_q8_coret_lqer`: `2.7552` final BPB,
+    `69.87ms/step`, `3,030,597` bytes, `969,403` headroom.
+  - `i1l2r2_d896e256_q8_coret_lqer`: `2.7436` final BPB,
+    `76.34ms/step`, `3,093,805` bytes, `906,195` headroom.
+- failed rows:
+  - `i3l3r2_d768e256_q864_coret_lqer`: Windows `0xC0000409` crash.
+  - `i3l3r3_d768e256_q864_coret_lqer`: runner timeout after 900s.
 
-First row startup confirms the new semantics:
-`train_quant_forward:1`, `train_quant_linear_count:6`,
-`train_quant_ternary_count:4`, `max_wallclock_seconds:600`.
+Fix:
+
+- `scripts/run_sub4_iotail_quant_matrix.py` now defaults
+  `QUANT_TRAIN_MODE=none`.
+- The old projection guardrail is opt-in via `--roundtrip-guard`.
+- Clean wall-clock sweeps should use `--train-quant-forward` without
+  `--roundtrip-guard`, so the training loop avoids export/reload conversions.
+
+Active corrected 10-minute wall-clock matrix:
+
+- record dir: `records/sub4-trainquant-clean-wallclock10m-20260425-190647`
+- settings: `TRAIN_QUANT_FORWARD=1`, `QUANT_TRAIN_MODE=none`,
+  `MAX_WALLCLOCK_SECONDS=600`, final artifacts, decimal
+  `SUBMISSION_SIZE_CAP_BYTES=4000000`.
+- first row startup confirms the intended semantics:
+  `train_quant_forward:1`, `train_quant_linear_count:6`,
+  `train_quant_ternary_count:4`, `quant_train_mode:none`,
+  `max_wallclock_seconds:600`.
