@@ -636,3 +636,56 @@ Active follow-up:
   - `i3l3r3_d768e256_q884_coret_lqer_lidx_r6t12`
 - startup check: the first row waited `30.287s` for the idle guard and then
   began training with the GPU at full load.
+
+## i5/l5 Precision-Ladder Tail
+
+New idea to test: make the outer IO path progressively lower precision from
+the first training forward, then let the repeated middle stay ternary:
+
+- entry: block `0` q16/fp16 passthrough, block `1` q8, block `2` q4,
+  block `3` q2, block `4` ternary.
+- middle: blocks `5-9` ternary.
+- exit: mirrored reuse of blocks `4,3,2,1,0`, so the exit precision ladder is
+  ternary/q2/q4/q8/q16.
+
+Implementation audit:
+
+- `transition_recursive_cycle` can represent the exact route. For r1 it is
+  `0,1,2,3,4,5,6,7,8,9,4,3,2,1,0`.
+- `TRAIN_QUANT_FORWARD=1` applies the q16/q8/q4/q2/ternary views from the first
+  forward pass; this is not a final-only quantization experiment.
+- `train_gpt.py` now accepts `2` and `16` in `QUANT_BITS_OVERRIDES`.
+- q16 means fp16 passthrough in the export codec and unquantized fp16 matmul in
+  the train-time forward path.
+- q2 uses the existing linear fake-quant/export path with a per-row scale and
+  low-cardinality int8 codes. This is train-time low precision, but not yet a
+  custom packed q2 storage kernel; if q2 wins, packing q2 is the next systems
+  cleanup.
+- `route_env(...)` now separates `io_width` from `ternary_start`, so block `4`
+  can be part of the mirrored IO shell while still being ternary.
+- `HRC_MLP_ONLY_BLOCKS` is set to `5,6,7,8,9`, so the repeated core is cheap,
+  while block `4` remains a full IO-tail block.
+
+Candidates added:
+
+- `i5l5r1_d512e192_q16q8q4q2t_coret_lqer_r6t12`
+- `i5l5r1_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12`
+- `i5l5r2_d512e192_q16q8q4q2t_coret_lqer_r6t12`
+- `i5l5r2_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12`
+- `i5l5r3_d512e192_q16q8q4q2t_coret_lqer_r6t12`
+- `i5l5r3_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12`
+- `i5l5r2_d448e160_q16q8q4q2t_coret_lqer_lidx_r6t12` as a smaller fallback if
+  the d512 r2/r3 rows are too slow locally.
+
+Route verification:
+
+- r1 route: `0,1,2,3,4,5,6,7,8,9,4,3,2,1,0`
+- r2 route: `0,1,2,3,4,5,6,7,8,9,5,6,7,8,9,4,3,2,1,0`
+- r3 route:
+  `0,1,2,3,4,5,6,7,8,9,5,6,7,8,9,5,6,7,8,9,4,3,2,1,0`
+
+Validation:
+
+- `py_compile` passed for `train_gpt.py`, `train_gpt_ternary.py`, and
+  `scripts/run_sub4_iotail_quant_matrix.py`.
+- `--list` shows all r1/r2/r3 i5/l5 precision-ladder candidates.

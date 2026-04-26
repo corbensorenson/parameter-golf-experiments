@@ -111,11 +111,19 @@ def route_env(
     heads: int,
     mlp_mult: float,
     io_quant: tuple[int, ...],
+    ternary_start: int | None = None,
+    mlp_only_start: int | None = None,
 ) -> dict[str, str]:
     unique_blocks = io_width + loop_width
     effective_depth = io_width + loop_width * repeats + io_width
-    if len(io_quant) != io_width:
-        raise ValueError("io_quant must provide one bit width per IO block")
+    ternary_start = io_width if ternary_start is None else int(ternary_start)
+    mlp_only_start = io_width if mlp_only_start is None else int(mlp_only_start)
+    if not 0 <= ternary_start <= unique_blocks:
+        raise ValueError("ternary_start must be within the unique block range")
+    if len(io_quant) != ternary_start:
+        raise ValueError("io_quant must provide one bit width per non-ternary prefix block")
+    if not io_width <= mlp_only_start <= unique_blocks:
+        raise ValueError("mlp_only_start must be inside the recursive core or at the end")
     return {
         "MODEL_DIM": str(model_dim),
         "FACTORED_EMBED_DIM": str(embed_dim),
@@ -127,10 +135,10 @@ def route_env(
         "HRC_RECURSIVE_CORE_START": str(io_width),
         "HRC_ROUTE_REPEATS": str(repeats),
         "HRC_DEPTH_SCHEDULE_MODE": "transition_recursive_cycle",
-        "HRC_MLP_ONLY_BLOCKS": mlp_only(io_width, unique_blocks),
+        "HRC_MLP_ONLY_BLOCKS": mlp_only(mlp_only_start, unique_blocks),
         "QUANT_WEIGHT_BITS": "4",
         "QUANT_BITS_OVERRIDES": quant_bits(*[(idx, bits) for idx, bits in enumerate(io_quant)]),
-        "QUANT_TERNARY_PATTERNS": block_patterns(io_width, unique_blocks),
+        "QUANT_TERNARY_PATTERNS": block_patterns(ternary_start, unique_blocks),
     }
 
 
@@ -476,6 +484,150 @@ CANDIDATES: list[dict[str, Any]] = [
                 heads=12,
                 mlp_mult=0.75,
                 io_quant=(8, 8, 4),
+            ),
+            **lqer_env(rank=6, top_k=12),
+            **loop_index_env(dim=32, scale_init=0.03),
+        },
+    },
+    {
+        "name": "i5l5r1_d512e192_q16q8q4q2t_coret_lqer_r6t12",
+        "base_profile": "i1l2r2_d512_e128_h8kv1_mlpinner_mlp075",
+        "preset": "2060sprint_micro_muon_cooltaper5k_cold_tokens8k",
+        "env": {
+            **route_env(
+                io_width=5,
+                loop_width=5,
+                repeats=1,
+                model_dim=512,
+                embed_dim=192,
+                heads=8,
+                mlp_mult=0.5,
+                io_quant=(16, 8, 4, 2),
+                ternary_start=4,
+                mlp_only_start=5,
+            ),
+            **lqer_env(rank=6, top_k=12),
+        },
+    },
+    {
+        "name": "i5l5r1_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12",
+        "base_profile": "i1l2r2_d512_e128_h8kv1_mlpinner_mlp075",
+        "preset": "2060sprint_micro_muon_cooltaper5k_cold_tokens8k",
+        "env": {
+            **route_env(
+                io_width=5,
+                loop_width=5,
+                repeats=1,
+                model_dim=512,
+                embed_dim=192,
+                heads=8,
+                mlp_mult=0.5,
+                io_quant=(16, 8, 4, 2),
+                ternary_start=4,
+                mlp_only_start=5,
+            ),
+            **lqer_env(rank=6, top_k=12),
+            **loop_index_env(dim=32, scale_init=0.03),
+        },
+    },
+    {
+        "name": "i5l5r2_d512e192_q16q8q4q2t_coret_lqer_r6t12",
+        "base_profile": "i1l2r2_d512_e128_h8kv1_mlpinner_mlp075",
+        "preset": "2060sprint_micro_muon_cooltaper5k_cold_tokens8k",
+        "env": {
+            **route_env(
+                io_width=5,
+                loop_width=5,
+                repeats=2,
+                model_dim=512,
+                embed_dim=192,
+                heads=8,
+                mlp_mult=0.5,
+                io_quant=(16, 8, 4, 2),
+                ternary_start=4,
+                mlp_only_start=5,
+            ),
+            **lqer_env(rank=6, top_k=12),
+        },
+    },
+    {
+        "name": "i5l5r2_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12",
+        "base_profile": "i1l2r2_d512_e128_h8kv1_mlpinner_mlp075",
+        "preset": "2060sprint_micro_muon_cooltaper5k_cold_tokens8k",
+        "env": {
+            **route_env(
+                io_width=5,
+                loop_width=5,
+                repeats=2,
+                model_dim=512,
+                embed_dim=192,
+                heads=8,
+                mlp_mult=0.5,
+                io_quant=(16, 8, 4, 2),
+                ternary_start=4,
+                mlp_only_start=5,
+            ),
+            **lqer_env(rank=6, top_k=12),
+            **loop_index_env(dim=32, scale_init=0.03),
+        },
+    },
+    {
+        "name": "i5l5r3_d512e192_q16q8q4q2t_coret_lqer_r6t12",
+        "base_profile": "i1l2r2_d512_e128_h8kv1_mlpinner_mlp075",
+        "preset": "2060sprint_micro_muon_cooltaper5k_cold_tokens8k",
+        "env": {
+            **route_env(
+                io_width=5,
+                loop_width=5,
+                repeats=3,
+                model_dim=512,
+                embed_dim=192,
+                heads=8,
+                mlp_mult=0.5,
+                io_quant=(16, 8, 4, 2),
+                ternary_start=4,
+                mlp_only_start=5,
+            ),
+            **lqer_env(rank=6, top_k=12),
+        },
+    },
+    {
+        "name": "i5l5r3_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12",
+        "base_profile": "i1l2r2_d512_e128_h8kv1_mlpinner_mlp075",
+        "preset": "2060sprint_micro_muon_cooltaper5k_cold_tokens8k",
+        "env": {
+            **route_env(
+                io_width=5,
+                loop_width=5,
+                repeats=3,
+                model_dim=512,
+                embed_dim=192,
+                heads=8,
+                mlp_mult=0.5,
+                io_quant=(16, 8, 4, 2),
+                ternary_start=4,
+                mlp_only_start=5,
+            ),
+            **lqer_env(rank=6, top_k=12),
+            **loop_index_env(dim=32, scale_init=0.03),
+        },
+    },
+    {
+        "name": "i5l5r2_d448e160_q16q8q4q2t_coret_lqer_lidx_r6t12",
+        "base_profile": "i1l2r2_d448_e128_h7kv1_mlpinner_mlp10",
+        "preset": "2060sprint_micro_muon_cooltaper5k_cold_tokens8k",
+        "env": {
+            **route_env(
+                io_width=5,
+                loop_width=5,
+                repeats=2,
+                model_dim=448,
+                embed_dim=160,
+                heads=7,
+                mlp_mult=0.5,
+                io_quant=(16, 8, 4, 2),
+                ternary_start=4,
+                mlp_only_start=5,
             ),
             **lqer_env(rank=6, top_k=12),
             **loop_index_env(dim=32, scale_init=0.03),

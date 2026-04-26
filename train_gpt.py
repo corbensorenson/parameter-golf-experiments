@@ -993,7 +993,7 @@ INT8_KEEP_FLOAT_STORE_DTYPE = torch.float16
 INT8_PER_ROW_SCALE_DTYPE = torch.float16
 INT8_CLIP_PERCENTILE = 99.99984
 INT8_CLIP_Q = INT8_CLIP_PERCENTILE / 100.0
-SUPPORTED_LINEAR_QUANT_BITS = {4, 5, 6, 8}
+SUPPORTED_LINEAR_QUANT_BITS = {2, 4, 5, 6, 8, 16}
 def parse_quant_bits_overrides(raw: str) -> tuple[tuple[str, int], ...]:
     overrides: list[tuple[str, int]] = []
     if not raw:
@@ -1438,6 +1438,11 @@ def quantize_state_dict_int8(state_dict: dict[str, Tensor]):
                 lqer_candidates[name] = (residual, float(residual.norm().item()))
             continue
         bits = select_quant_bits(name)
+        if bits >= 16:
+            kept = keep_float_tensor(name, t, passthrough_orig_dtypes)
+            passthrough[name] = kept
+            add_export_payload("passthrough", tensor_nbytes(kept))
+            continue
         q, s = quantize_float_tensor(t, bits=bits)
         if s.ndim > 0 or bits != 8:
             qmeta[name] = {"scheme": "per_row", "axis": 0, "bits": bits} if s.ndim > 0 else {"bits": bits}
