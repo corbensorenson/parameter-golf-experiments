@@ -18,16 +18,15 @@ engineering interpretation.
   `148.36ms/step`, `4046` wall-clock-stop steps, `3,967,875` bytes, and
   `32,125` bytes of decimal 4MB headroom.
 - The best soft-target sub-4 quality reference is now
-  `i5l9r5_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12`: final export `2.5314`
-  BPB, `201.89ms/step`, `4,105,939` bytes, `105,939` bytes over the decimal
-  4MB target. This compares against `i5l5r9` at the same 55 virtual layers and
-  5k steps, so the difference is more unique loop blocks and fewer repeats.
+  `i4l9r5_d512e192_q16q8q4t_coret_lqer_lidx_r6t12`: final export `2.5009`
+  BPB, `170.71ms/step`, `4,111,251` bytes, `111,251` bytes over the decimal
+  4MB target. This beats `i5l9r5` by `0.0305` BPB while also being faster.
 - The best quality q884 row is slightly over the 4MB target:
   `i3l3r3_d768e256_q884_coret_lqer_r6` reached `2.5505` BPB at
   `4,035,469` bytes, `35,469` bytes over cap.
-- The i5 q16/q8/q4/q2/ternary ladder is no longer just a small speed lane:
-  `i5l5r9` is the clean legal quality leader at fixed 5k steps, while
-  `i5l9r5` is the strongest soft-cap quality row.
+- The q16/q8/q4/q2/ternary IO-ladder family is no longer just a small speed
+  lane: `i5l5r9` is the clean legal quality leader at fixed 5k steps, while
+  `i4l9r5` is the strongest soft-target quality row.
 - The r9 loop-index test proved the loop index can help under high recurrence:
   r9 with loop index beat no-loop-index by `0.0455` BPB. But r9 was too slow
   locally, around `211-215ms/step`, and finished far behind q884 r3.
@@ -82,12 +81,14 @@ engineering interpretation.
    signal is real, but it is only worth paying for when the loop repeats enough
    or when the route is otherwise ambiguous.
 
-4. The i5 precision ladder is now a promoted sub-4 direction.
+4. The precision-ladder IO family is now a promoted sub-4 direction.
    q16/q8/q4/q2/ternary from step one works. At equal 55 virtual layers and 5k
-   steps, `i5l9r5` beat `i5l5r9` by `0.0294` final BPB, but it needs about
-   `106KB` shaved to fit the decimal 4MB target. Pushing the same `i5l9`
-   physical shape from r5 to r9 worsened quality to `2.5731` BPB and slowed to
-   `269.01ms/step`, so more repeats are not automatically better.
+   steps, `i5l9r5` beat `i5l5r9` by `0.0294` final BPB, but `i4l9r5` then
+   beat `i5l9r5` by `0.0305` BPB while running faster. `i3l9r5` collapsed to
+   `3.1201` BPB, so the q16/q8/t ladder is too abrupt; q16/q8/q4/t looks like
+   the current sweet spot. Pushing `i5l9` from r5 to r9 worsened quality to
+   `2.5731` BPB and slowed to `269.01ms/step`, so more repeats are not
+   automatically better.
 
 5. LQER rank/top-K are real byte-quality knobs; factor bits were not.
    In the asymmetric LQER path, `LQER_FACTOR_BITS` does not save bytes. Rank and
@@ -124,8 +125,8 @@ engineering interpretation.
 2. Local 10-minute wall-clock default:
    `i3l3r3_d768e256_q884_coret_lqer_r6t12`.
 3. Soft-target quality reference:
-   `i5l9r5_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12`.
-4. If we spend more local time: keep `i5l9r5` as the quality reference even if
+   `i4l9r5_d512e192_q16q8q4t_coret_lqer_lidx_r6t12`.
+4. If we spend more local time: keep `i4l9r5` as the quality reference even if
    slightly over 4MB, then run a 10-minute wall-clock comparison against q884
    r3 and i5l5r9.
 5. If we get H100 time: run d1536/e384 and d2048/e512 CaseOps/HRC capacity
@@ -186,3 +187,19 @@ Result:
   BPB, `269.01ms/step`, `4,083,767` bytes, `83,767` bytes over the decimal
   4MB target. This is worse and slower than r5, so r5 is the better tested
   repeat count for the i5/l9 physical shape.
+
+Follow-up:
+`records/sub4-i3i4l9r5-fixed5k-20260426-024640`.
+
+Purpose: compare shorter IO tails against `i5l9r5` while keeping loop width 9,
+route repeats 5, d512/e192, loop index, LQER r6t12, and train-time quantized
+forward. The ladders were `i3: q16/q8/t` and `i4: q16/q8/q4/t`.
+
+Results:
+
+- `i4l9r5_d512e192_q16q8q4t_coret_lqer_lidx_r6t12`: final export `2.5009`
+  BPB, `170.71ms/step`, `4,111,251` bytes, `111,251` bytes over the decimal
+  4MB target.
+- `i3l9r5_d512e192_q16q8t_coret_lqer_lidx_r6t12`: final export `3.1201` BPB,
+  `164.37ms/step`, `4,068,247` bytes, `68,247` bytes over the decimal 4MB
+  target.

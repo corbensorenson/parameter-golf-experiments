@@ -15,9 +15,12 @@ The short current read:
   `i3l3r3_d768e256_q884_coret_lqer_r6t12`, final export `2.5749` BPB,
   `148.36ms/step`, `3,967,875` bytes.
 - Best soft-target sub-4MB quality row:
+  `i4l9r5_d512e192_q16q8q4t_coret_lqer_lidx_r6t12`, final export `2.5009`
+  BPB, `170.71ms/step`, `4,111,251` bytes, about `111KB` over the decimal 4MB
+  target.
+- Best i5/l9 soft-target row:
   `i5l9r5_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12`, final export
-  `2.5314` BPB, `201.89ms/step`, `4,105,939` bytes, about `106KB` over the
-  decimal 4MB target.
+  `2.5314` BPB, `201.89ms/step`, `4,105,939` bytes.
 - Latest deeper-repeat i5/l9 row:
   `i5l9r9_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12`, final export
   `2.5731` BPB, `269.01ms/step`, `4,083,767` bytes.
@@ -93,8 +96,8 @@ Cost/risk:
 
 Current read:
 
-- `i5l9r5` is the best current soft-target quality reference at `2.5314` BPB,
-  about `106KB` over the sub-4 target.
+- `i4l9r5` is the best current soft-target quality reference at `2.5009` BPB,
+  about `111KB` over the sub-4 target.
 - `i5l5r9` is the best clean fixed-step row at `2.5608` BPB.
 - q884 `r6t12` remains the best tested 10-minute local wall-clock row at
   `2.5749` BPB.
@@ -275,6 +278,7 @@ Current read:
 - i5/l5 r9 is much better than r2 at fixed 5k steps.
 - i5/l9 r5 beat i5/l5 r9 at the same 55 virtual layers, but i5/l9 r9 was worse
   and slower than r5.
+- i4/l9 r5 beat i5/l9 r5 and is now the best soft-target fixed-step row.
 
 ### Loop Index
 
@@ -461,8 +465,9 @@ Current read:
 
 - q884 IO tail with ternary core is still the strongest local 10-minute
   wall-clock family.
-- q16/q8/q4/q2/ternary i5 routes are the strongest fixed-step/soft-target
-  quality family so far.
+- q16/q8/q4/ternary i4/l9/r5 is the strongest fixed-step/soft-target quality
+  row so far.
+- q16/q8/ternary i3/l9/r5 lost too much IO precision and fell to `3.1201` BPB.
 
 ### Ternary Core
 
@@ -1557,10 +1562,12 @@ Current read:
 - Current promoted legal family.
 - Improve by shaving soft-cap row, widening carefully, or retuning LQER.
 
-### Precision Ladder i5 Family
+### Precision Ladder i3/i4/i5 Family
 
 Examples:
 
+- `i3l9r5_d512e192_q16q8t_coret_lqer_lidx_r6t12`
+- `i4l9r5_d512e192_q16q8q4t_coret_lqer_lidx_r6t12`
 - `i5l5r2_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12`
 - `i5l5r9_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12`
 - `i5l9r5_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12`
@@ -1576,9 +1583,11 @@ Current read:
 - Correctly implemented from step one.
 - Loop index helps this family.
 - `i5l5r9` is the best clean fixed-step sub-4 row so far.
-- `i5l9r5` is the best soft-target quality row so far.
+- `i4l9r5` is the best soft-target quality row so far.
+- `i5l9r5` is still strong, but slower and worse than i4/l9/r5.
 - `i5l9r9` shows that more repeats can overdo the route: it was slower and
   worse than r5.
+- `i3l9r5` shows that dropping the q4 tail layer is too aggressive.
 
 ### i6/l9 Deep IO Tail
 
@@ -1617,7 +1626,7 @@ Do not promote these without new evidence:
 
 ### If The Goal Is Better Sub-4 Quality
 
-1. Start from `i5l9r5_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12` for
+1. Start from `i4l9r5_d512e192_q16q8q4t_coret_lqer_lidx_r6t12` for
    fixed-step quality exploration.
 2. Start from `i3l3r3_d768e256_q884_coret_lqer_r6t12` for local 10-minute
    wall-clock comparison.
@@ -1664,9 +1673,9 @@ Do not promote these without new evidence:
 
 ## Current Best Next Bets
 
-1. Run a 10-minute wall-clock comparison between `i5l9r5`, `i5l5r9`, and the
-   q884 r3 wall-clock anchor.
-2. Explore i5/l9 size/quality tweaks around r5 rather than adding more repeats.
+1. Run a 10-minute wall-clock comparison between `i4l9r5`, `i5l9r5`,
+   `i5l5r9`, and the q884 r3 wall-clock anchor.
+2. Explore i4/l9 size/quality tweaks around r5 rather than adding more repeats.
 3. Improve the q884 r3 legal row or shave the q884 `r6` soft-cap row.
 4. Run the d1536/e384 and d2048/e512 H100 capacity ladder with export-honest
    train-time quant.
