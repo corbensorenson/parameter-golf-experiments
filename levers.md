@@ -30,16 +30,16 @@ The short current read:
 - Active quality-first i4/l9/r5 update:
   `records/sub4-quality-first-i4-5k-20260426-034039` is still running. The
   best completed interim row is
-  `i4l9r5_d768e320_q16q8q4t_lqer_lidx_r8t16`, final export `2.4962` BPB,
-  `273.78ms/step`, `7,868,221` bytes. The faster
-  `i4l9r5_d640e256_q16q8q4t_lqer_lidx_r8t16` is close at `2.4983` BPB and
-  `227.55ms/step`, so the next local lever matrix uses d640/e256 for most
-  controls and keeps d768/e320 as a width check.
+  `i4l9r5_d640e256_q16q8q8t_lqer_lidx_r8t16`, final export `2.4949` BPB,
+  `236.55ms/step`, `6,259,569` bytes. The wider
+  `i4l9r5_d768e320_q16q8q4t_lqer_lidx_r8t16` is close at `2.4962` BPB but
+  slower and larger.
 - Next prepared matrix group:
   `sub4_leader_levers` in `scripts/run_sub4_iotail_quant_matrix.py`, covering
   QK gain, scalar SmearGate, attention-output gates, sparse attention gates,
   Huber Muon decay, parallel residuals, frozen recurrent carry, score-first
-  TTT, and a conservative stacked public-style row.
+  TTT, a conservative stacked public-style row, and prime loop-width l11/l13
+  probes.
 
 ## How To Read This
 
@@ -100,6 +100,10 @@ Implemented for the next local matrix:
   3x3 carry coefficients are valid for i4/l9.
 - `TTT_SCORE_FIRST_ENABLED=1` control-only legal eval probe at LR `0.005`,
   max `24` updates.
+- Prime loop-width expansion:
+  `i4l11r5` and `i4l13r5` at d640/e256, with both `q16/q8/q4/t` and the newly
+  promising `q16/q8/q8/t` IO ladder. The q8 ladder variants also get QK 5.25
+  probes.
 
 Not yet implemented as drop-in local levers:
 

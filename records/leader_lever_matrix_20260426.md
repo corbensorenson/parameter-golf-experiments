@@ -29,18 +29,20 @@ Sources:
 ## Current Anchor
 
 The current active run is `records/sub4-quality-first-i4-5k-20260426-034039`.
-At the time this matrix was prepared, four rows had completed:
+At the time the prime-loop candidates were added, five rows had completed:
 
 | Candidate | Final BPB | Step Avg | Total Bytes |
 |---|---:|---:|---:|
+| `i4l9r5_d640e256_q16q8q8t_lqer_lidx_r8t16` | 2.4949 | 236.55ms | 6,259,569 |
 | `i4l9r5_d768e320_q16q8q4t_lqer_lidx_r8t16` | 2.4962 | 273.78ms | 7,868,221 |
 | `i4l9r5_d640e256_q16q8q4t_lqer_lidx_r8t16` | 2.4983 | 227.55ms | 5,863,841 |
 | `i4l9r5_d640e224_q16q8q4t_lqer_lidx_r8t16` | 2.5074 | 228.77ms | 5,651,929 |
 | `i4l9r5_d768e256_q16q8q4t_lqer_lidx_r8t16` | 2.5096 | 271.03ms | 7,455,817 |
 
-The d768/e320 row is the interim quality leader, but d640/e256 is close,
-faster, and easier on VRAM. The next matrix therefore tests most levers on
-d640/e256 and keeps two d768/e320 confirmation probes.
+The d640/e256 `q16/q8/q8/t` row is now the interim quality leader. The
+d768/e320 `q16/q8/q4/t` row is close but slower and much larger. The next matrix
+therefore tests most levers on d640/e256, keeps two d768/e320 confirmation
+probes, and adds prime loop-width probes at l11 and l13.
 
 ## Candidate Group
 
@@ -71,6 +73,12 @@ Candidates:
 | `i4l9r5_d640e256_q16q8q4t_publicsafe_lqer_lidx_r8t16` | conservative stacked row: QK, SmearGate, Huber WD, parres4, frozen carry |
 | `i4l9r5_d768e320_q16q8q4t_qk525_lqer_lidx_r8t16` | wider-shape QK 5.25 confirmation |
 | `i4l9r5_d768e320_q16q8q4t_smear_lqer_lidx_r8t16` | wider-shape SmearGate confirmation |
+| `i4l11r5_d640e256_q16q8q4t_lqer_lidx_r8t16` | prime loop-width baseline: l11/r5, original q4 third IO rung |
+| `i4l13r5_d640e256_q16q8q4t_lqer_lidx_r8t16` | prime loop-width baseline: l13/r5, original q4 third IO rung |
+| `i4l11r5_d640e256_q16q8q8t_lqer_lidx_r8t16` | prime loop-width baseline: l11/r5, softer q8 third IO rung |
+| `i4l13r5_d640e256_q16q8q8t_lqer_lidx_r8t16` | prime loop-width baseline: l13/r5, softer q8 third IO rung |
+| `i4l11r5_d640e256_q16q8q8t_qk525_lqer_lidx_r8t16` | l11/r5 plus QK gain 5.25 |
+| `i4l13r5_d640e256_q16q8q8t_qk525_lqer_lidx_r8t16` | l13/r5 plus QK gain 5.25 |
 
 ## Suggested Command After The Current Matrix Finishes
 
@@ -101,6 +109,9 @@ python scripts/run_sub4_iotail_quant_matrix.py `
   signal.
 - If a single control wins on d640/e256, rerun it on d768/e320 and the final
   best shape from the active matrix.
+- If l11/l13 beat l9, the next structural sweep should stay in prime-ish
+  territory: l11/r7, l13/r5, l13/r7, and maybe i5/l11/r5 if bytes are still
+  acceptable.
 - If the stacked `publicsafe` row loses, do not discard its components. These
   controls are often non-additive in small models.
 - Keep CaseOps/SP8192 exact-byte sidecars for all tokenizer experiments.

@@ -1216,6 +1216,48 @@ LEADER_LEVER_CANDIDATES: list[dict[str, Any]] = [
         embed_dim=320,
         extra_env=smear_gate_env(width=12),
     ),
+    quality_i4_candidate(
+        "i4l11r5_d640e256_q16q8q4t_lqer_lidx_r8t16",
+        model_dim=640,
+        embed_dim=256,
+        loop_width=11,
+    ),
+    quality_i4_candidate(
+        "i4l13r5_d640e256_q16q8q4t_lqer_lidx_r8t16",
+        model_dim=640,
+        embed_dim=256,
+        loop_width=13,
+    ),
+    quality_i4_candidate(
+        "i4l11r5_d640e256_q16q8q8t_lqer_lidx_r8t16",
+        model_dim=640,
+        embed_dim=256,
+        loop_width=11,
+        io_quant=(16, 8, 8),
+    ),
+    quality_i4_candidate(
+        "i4l13r5_d640e256_q16q8q8t_lqer_lidx_r8t16",
+        model_dim=640,
+        embed_dim=256,
+        loop_width=13,
+        io_quant=(16, 8, 8),
+    ),
+    quality_i4_candidate(
+        "i4l11r5_d640e256_q16q8q8t_qk525_lqer_lidx_r8t16",
+        model_dim=640,
+        embed_dim=256,
+        loop_width=11,
+        io_quant=(16, 8, 8),
+        extra_env=qk_gain_env(5.25),
+    ),
+    quality_i4_candidate(
+        "i4l13r5_d640e256_q16q8q8t_qk525_lqer_lidx_r8t16",
+        model_dim=640,
+        embed_dim=256,
+        loop_width=13,
+        io_quant=(16, 8, 8),
+        extra_env=qk_gain_env(5.25),
+    ),
 ]
 
 CANDIDATES.extend(LEADER_LEVER_CANDIDATES)
