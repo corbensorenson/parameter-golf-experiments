@@ -621,3 +621,18 @@ New follow-up candidates:
 - `i3l3r3_d768e256_q884_coret_lqer_lidx_t11` and
   `i3l3r3_d768e256_q884_coret_lqer_lidx_r6t12`: test whether tiny loop-index
   conditioning helps the looped middle once the byte budget is legal.
+
+Active follow-up:
+
+- record dir: `records/sub4-q884-legal-lidx-10m-20260425-223322`
+- settings: 10-minute local wallclock per row, final artifacts,
+  `TRAIN_QUANT_FORWARD=1`, `QUANT_TRAIN_MODE=none`, `--allow-over-cap`, idle
+  guard.
+- rows:
+  - `i3l3r3_d768e256_q884_coret_lqer_t11`
+  - `i3l3r3_d768e256_q884_coret_lqer_r6t14`
+  - `i3l3r3_d768e256_q884_coret_lqer_r6t12`
+  - `i3l3r3_d768e256_q884_coret_lqer_lidx_t11`
+  - `i3l3r3_d768e256_q884_coret_lqer_lidx_r6t12`
+- startup check: the first row waited `30.287s` for the idle guard and then
+  began training with the GPU at full load.
