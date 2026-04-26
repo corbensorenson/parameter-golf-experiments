@@ -1878,7 +1878,7 @@ def parse_vocab_moe_layers(
 
     for raw_item in spec.replace(";", ",").split(","):
         item = raw_item.strip().lower()
-        if not item or item in {"none", "off", "0"}:
+        if not item or item in {"none", "off"}:
             continue
         if item in {"input", "embed", "embedding"}:
             input_enabled = True
