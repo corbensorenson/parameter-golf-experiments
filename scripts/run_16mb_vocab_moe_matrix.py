@@ -38,6 +38,7 @@ PUBLIC_STACK_16MB: dict[str, str] = {
     "MODEL_CODEC_LEVEL": "9",
     "SUBMISSION_SIZE_CAP_BYTES": "16000000",
     "FAIL_ON_ARTIFACT_CAP": "0",
+    "TRAIN_ABORT_ON_NONFINITE": "1",
     "QUANT_WEIGHT_BITS": "6",
     "QUANT_INT8_PROMOTE_PATTERNS": "tok_emb.weight,lm_head.weight,embed_proj",
     "MODEL_DIM": "640",
@@ -45,15 +46,22 @@ PUBLIC_STACK_16MB: dict[str, str] = {
     "NUM_KV_HEADS": "1",
     "FACTORED_EMBED_DIM": "256",
     "MLP_MULT": "2.0",
-    "QK_GAIN_INIT": "5.25",
+    # Train-quant-forward is touchier than the old post-training q6 proof
+    # runs. These cooler values keep the control row finite on the 2060 so the
+    # VocabMoE comparisons produce usable signal instead of late-run NaNs.
+    "WARMUP_STEPS": "20",
+    "TIED_EMBED_LR": "0.002",
+    "MATRIX_LR": "0.0016",
+    "SCALAR_LR": "0.0016",
+    "QK_GAIN_INIT": "5.0",
     "LOGIT_SOFTCAP": "12",
     "ATTN_OUT_GATE_ENABLED": "1",
     "ATTN_OUT_GATE_WIDTH": "24",
     "SMEAR_GATE_ENABLED": "1",
     "SMEAR_GATE_WIDTH": "12",
-    "HRC_FROZEN_CARRY_ENABLED": "1",
+    "HRC_FROZEN_CARRY_ENABLED": "0",
     "HRC_FROZEN_CARRY_BLOCKS": "",
-    "MUON_WEIGHT_DECAY": "0.095",
+    "MUON_WEIGHT_DECAY": "0.0",
     "MUON_WEIGHT_DECAY_MODE": "huber",
     "MUON_WEIGHT_DECAY_HUBER_DELTA_SCALE": "3.0",
     "LQER_ENABLED": "1",
@@ -109,9 +117,9 @@ def vocab_moe_env(
 
 CANDIDATES: list[dict[str, Any]] = [
     {
-        "name": "i3l3r3_d640e256_q6_publicstack_control",
+        "name": "i3l3r3_d640e256_q6_stable_control",
         "env": dict(BASE_16MB),
-        "notes": "same route/stack, no vocab MoE",
+        "notes": "same cooled q6 route/stack, no vocab MoE",
     },
     {
         "name": "i3l3r3_d640e256_q6_vocabmoe_static_k16r2_input",

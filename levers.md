@@ -180,9 +180,16 @@ Queued local probes:
 
 Current read:
 
-- Unknown until the queued matrix completes.
+- The first queued run used the public-style q6 stack too hot for
+  train-quant-forward on the 2060; rows reached about `1.83-1.96` BPB by
+  `1k-1.5k` steps and then diverged to `nan`. That run is not a valid quality
+  comparison.
+- The corrected queued run cools the train-quant-forward stack:
+  `TIED_EMBED_LR=0.002`, `MATRIX_LR=0.0016`, `SCALAR_LR=0.0016`,
+  `WARMUP_STEPS=20`, no frozen carry, no Muon WD, and
+  `TRAIN_ABORT_ON_NONFINITE=1`.
 - The control row is included so we can attribute wins to VocabMoE rather than
-  the public-stack/larger-width scaffold.
+  the cooled q6 HRC scaffold.
 - If `loop_first` wins, the idea is likely acting as a token-conditioned repair
   for the recurrent middle. If `input` wins, it is closer to a learned
   vocabulary-feature embedding.
