@@ -577,6 +577,9 @@ Active targeted sweep:
   at RoPE application. This is different from the previous fair q884 completion
   and should be treated as a local stability/repro issue, not a quality result.
   The runner continued to the `t12` sidecar row after a fresh idle wait.
+- second-row checkpoint: `i3l3r3_d768e256_q884_coret_lqer_t12` reached 1k
+  steps cleanly with `2.9395` BPB at `159.60ms/step`, so the q884 family is not
+  globally broken. Let this row complete before making a byte/quality call.
 
 Queued follow-up: the best q884 run did not enable
 `HRC_LOOP_INDEX_ENABLED`, even though the looped-middle idea wants virtual-pass
