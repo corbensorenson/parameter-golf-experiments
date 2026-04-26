@@ -1004,6 +1004,12 @@ SUB4_PROFILES.update(
         "i1l2r2_d640_e160_h10kv1_mlpinner_mlp10": _hrc_profile(
             640, 160, 10, kv_heads=1, mlp_mult=1.0, group_size=64
         ),
+        "i1l2r2_d640_e224_h10kv1_mlpinner_mlp050": _hrc_profile(
+            640, 224, 10, kv_heads=1, mlp_mult=0.5, group_size=64
+        ),
+        "i1l2r2_d640_e256_h10kv1_mlpinner_mlp050": _hrc_profile(
+            640, 256, 10, kv_heads=1, mlp_mult=0.5, group_size=64
+        ),
         # Near-cap lanes: spend the unused byte budget on width and a less
         # bottlenecked tied IO rank while keeping only the entry/exit block
         # attention-heavy. These are aimed more at H100-style throughput than
@@ -1013,6 +1019,9 @@ SUB4_PROFILES.update(
         ),
         "i1l2r2_d768_e256_h12kv1_mlpinner_mlp075": _hrc_profile(
             768, 256, 12, kv_heads=1, mlp_mult=0.75, group_size=64
+        ),
+        "i1l2r2_d768_e320_h12kv1_mlpinner_mlp050": _hrc_profile(
+            768, 320, 12, kv_heads=1, mlp_mult=0.5, group_size=64
         ),
         "i1l2r2_d896_e256_h14kv1_mlpinner_mlp050": _hrc_profile(
             896, 256, 14, kv_heads=1, mlp_mult=0.5, group_size=64

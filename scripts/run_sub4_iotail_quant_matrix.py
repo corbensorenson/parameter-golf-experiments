@@ -166,6 +166,84 @@ def loop_index_env(dim: int = 32, scale_init: float = 0.03) -> dict[str, str]:
     }
 
 
+def quality_base_profile(model_dim: int, embed_dim: int) -> str:
+    if model_dim == 512:
+        return "i1l2r2_d512_e128_h8kv1_mlpinner_mlp075"
+    if model_dim == 640 and embed_dim == 224:
+        return "i1l2r2_d640_e224_h10kv1_mlpinner_mlp050"
+    if model_dim == 640 and embed_dim == 256:
+        return "i1l2r2_d640_e256_h10kv1_mlpinner_mlp050"
+    if model_dim == 768 and embed_dim == 256:
+        return "i1l2r2_d768_e256_h12kv1_mlpinner_mlp075"
+    if model_dim == 768 and embed_dim == 320:
+        return "i1l2r2_d768_e320_h12kv1_mlpinner_mlp050"
+    raise ValueError(f"no quality base profile for d{model_dim}/e{embed_dim}")
+
+
+def quality_heads(model_dim: int) -> int:
+    if model_dim == 512:
+        return 8
+    if model_dim == 640:
+        return 10
+    if model_dim == 768:
+        return 12
+    raise ValueError(f"no head count for d{model_dim}")
+
+
+def attention_core_blocks(io_width: int, loop_width: int, mode: str) -> str:
+    loop_blocks = list(range(io_width, io_width + loop_width))
+    if mode == "mlp":
+        return ",".join(str(idx) for idx in loop_blocks)
+    if mode == "first":
+        return ",".join(str(idx) for idx in loop_blocks[1:])
+    if mode == "edges":
+        return ",".join(str(idx) for idx in loop_blocks[1:-1])
+    if mode == "every3":
+        full_attention = set(loop_blocks[::3])
+        return ",".join(str(idx) for idx in loop_blocks if idx not in full_attention)
+    raise ValueError(f"unknown attention core mode {mode!r}")
+
+
+def quality_i4_candidate(
+    name: str,
+    *,
+    model_dim: int,
+    embed_dim: int,
+    loop_width: int = 9,
+    repeats: int = 5,
+    io_quant: tuple[int, ...] = (16, 8, 4),
+    core_bits: int | str = "ternary",
+    lqer_rank: int = 8,
+    lqer_top_k: int = 16,
+    attention_mode: str = "mlp",
+) -> dict[str, Any]:
+    io_width = 4
+    env = route_env(
+        io_width=io_width,
+        loop_width=loop_width,
+        repeats=repeats,
+        model_dim=model_dim,
+        embed_dim=embed_dim,
+        heads=quality_heads(model_dim),
+        mlp_mult=0.5,
+        io_quant=io_quant,
+        ternary_start=len(io_quant),
+        mlp_only_start=io_width,
+    )
+    env["HRC_MLP_ONLY_BLOCKS"] = attention_core_blocks(io_width, loop_width, attention_mode)
+    if core_bits != "ternary":
+        env["QUANT_WEIGHT_BITS"] = str(int(core_bits))
+        env["QUANT_TERNARY_PATTERNS"] = ""
+    env.update(lqer_env(rank=lqer_rank, top_k=lqer_top_k))
+    env.update(loop_index_env(dim=32, scale_init=0.03))
+    return {
+        "name": name,
+        "base_profile": quality_base_profile(model_dim, embed_dim),
+        "preset": "2060sprint_micro_muon_cooltaper5k_cold_tokens8k",
+        "env": env,
+    }
+
+
 CANDIDATES: list[dict[str, Any]] = [
     {
         "name": "i1l2r2_d768e256_q8_coret_lqer",
@@ -712,6 +790,101 @@ CANDIDATES: list[dict[str, Any]] = [
             **loop_index_env(dim=32, scale_init=0.03),
         },
     },
+    quality_i4_candidate(
+        "i4l9r5_d640e224_q16q8q4t_lqer_lidx_r8t16",
+        model_dim=640,
+        embed_dim=224,
+    ),
+    quality_i4_candidate(
+        "i4l9r5_d640e256_q16q8q4t_lqer_lidx_r8t16",
+        model_dim=640,
+        embed_dim=256,
+    ),
+    quality_i4_candidate(
+        "i4l9r5_d768e256_q16q8q4t_lqer_lidx_r8t16",
+        model_dim=768,
+        embed_dim=256,
+    ),
+    quality_i4_candidate(
+        "i4l9r5_d768e320_q16q8q4t_lqer_lidx_r8t16",
+        model_dim=768,
+        embed_dim=320,
+    ),
+    quality_i4_candidate(
+        "i4l9r5_d640e256_q16q8q8t_lqer_lidx_r8t16",
+        model_dim=640,
+        embed_dim=256,
+        io_quant=(16, 8, 8),
+    ),
+    quality_i4_candidate(
+        "i4l9r5_d640e256_q16q16q8t_lqer_lidx_r8t16",
+        model_dim=640,
+        embed_dim=256,
+        io_quant=(16, 16, 8),
+    ),
+    quality_i4_candidate(
+        "i4l9r5_d640e256_q16q8q4_q4core_lqer_lidx_r8t16",
+        model_dim=640,
+        embed_dim=256,
+        core_bits=4,
+    ),
+    quality_i4_candidate(
+        "i4l9r5_d640e256_q16q8q4_q2core_lqer_lidx_r8t16",
+        model_dim=640,
+        embed_dim=256,
+        core_bits=2,
+    ),
+    quality_i4_candidate(
+        "i4l9r5_d640e256_q16q8q4t_lqer_lidx_r10t20",
+        model_dim=640,
+        embed_dim=256,
+        lqer_rank=10,
+        lqer_top_k=20,
+    ),
+    quality_i4_candidate(
+        "i4l9r5_d640e256_q16q8q4t_lqer_lidx_r12t24",
+        model_dim=640,
+        embed_dim=256,
+        lqer_rank=12,
+        lqer_top_k=24,
+    ),
+    quality_i4_candidate(
+        "i4l9r5_d640e256_q16q8q4t_attncore1_lqer_lidx_r8t16",
+        model_dim=640,
+        embed_dim=256,
+        attention_mode="first",
+    ),
+    quality_i4_candidate(
+        "i4l9r5_d640e256_q16q8q4t_attnedge_lqer_lidx_r8t16",
+        model_dim=640,
+        embed_dim=256,
+        attention_mode="edges",
+    ),
+    quality_i4_candidate(
+        "i4l9r5_d640e256_q16q8q4t_attnevery3_lqer_lidx_r8t16",
+        model_dim=640,
+        embed_dim=256,
+        attention_mode="every3",
+    ),
+    quality_i4_candidate(
+        "i4l8r5_d640e256_q16q8q4t_lqer_lidx_r8t16",
+        model_dim=640,
+        embed_dim=256,
+        loop_width=8,
+    ),
+    quality_i4_candidate(
+        "i4l10r5_d640e256_q16q8q4t_lqer_lidx_r8t16",
+        model_dim=640,
+        embed_dim=256,
+        loop_width=10,
+    ),
+    quality_i4_candidate(
+        "i4l12r4_d640e256_q16q8q4t_lqer_lidx_r8t16",
+        model_dim=640,
+        embed_dim=256,
+        loop_width=12,
+        repeats=4,
+    ),
     {
         "name": "i5l9r5_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12",
         "base_profile": "i1l2r2_d512_e128_h8kv1_mlpinner_mlp075",
