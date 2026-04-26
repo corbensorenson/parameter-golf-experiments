@@ -467,3 +467,18 @@ Completion update:
   `--wait-for-idle-gpu`, `--idle-max-util`, `--idle-max-memory-mib`,
   `--idle-seconds`, and `--idle-poll-seconds` so future wall-clock sweeps can
   avoid starting candidates while the GPU is busy.
+
+Active fair rerun:
+
+- record dir: `records/sub4-trainquant-fair-wallclock10m-20260425-202436`
+- candidates:
+  - `i1l2r2_d768e256_q8_coret_lqer`
+  - `i1l2r2_d896e256_q8_coret_lqer`
+  - `i3l3r2_d768e256_q864_coret_lqer`
+  - `i3l3r3_d768e256_q884_coret_lqer`
+- settings: `TRAIN_QUANT_FORWARD=1`, `QUANT_TRAIN_MODE=none`,
+  `MAX_WALLCLOCK_SECONDS=600`, final artifacts, idle guard enabled with
+  `--idle-max-util 25`, `--idle-max-memory-mib 2500`, `--idle-seconds 30`.
+- first candidate waited `30.311s` and started at `18%` GPU utilization and
+  `994MiB` VRAM, so this should be a much cleaner local 2060 wall-clock
+  comparison.
