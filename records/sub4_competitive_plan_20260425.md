@@ -647,6 +647,20 @@ Active follow-up:
   - `i3l3r3_d768e256_q884_coret_lqer_lidx_t11` is currently running. At 2k
     steps it was at `2.6387` BPB and `147.17ms/step`.
 
+Completion:
+
+| Candidate | Final Export BPB | Step avg | Stop step | Bytes | Headroom | Read |
+|---|---:|---:|---:|---:|---:|---|
+| `i3l3r3_d768e256_q884_coret_lqer_r6t12` | 2.5749 | 148.36 ms | 4046 | 3,967,875 | 32,125 | Best legal q884 row. |
+| `i3l3r3_d768e256_q884_coret_lqer_lidx_r6t12` | 2.6935 | 147.66 ms | 4065 | 3,999,759 | 241 | Legal but worse quality. |
+| `i3l3r3_d768e256_q884_coret_lqer_lidx_t11` | 2.7082 | 148.91 ms | 4031 | 4,000,715 | -715 | Over cap and worse quality. |
+| `i3l3r3_d768e256_q884_coret_lqer_r6t14` | n/a | 157.19 ms | n/a | n/a | n/a | CUDA illegal memory crash. |
+| `i3l3r3_d768e256_q884_coret_lqer_t11` | n/a | 176.68 ms | n/a | n/a | n/a | Runner timeout. |
+
+Read: tiny loop-index conditioning did not help this q884 shape. Keep
+`i3l3r3_d768e256_q884_coret_lqer_r6t12` as the promoted legal local q884 row
+unless the i5/l5 precision ladder beats it.
+
 ## i5/l5 Precision-Ladder Tail
 
 New idea to test: make the outer IO path progressively lower precision from
@@ -715,3 +729,14 @@ Queued matrix:
 - settings: 10-minute local wallclock per row, final artifacts,
   `TRAIN_QUANT_FORWARD=1`, `QUANT_TRAIN_MODE=none`, `--allow-over-cap`, idle
   guard.
+
+Startup update:
+
+- The q884 sweep finished, so this queued matrix has started.
+- First active row:
+  `i5l5r1_d512e192_q16q8q4q2t_coret_lqer_r6t12`.
+- Startup log confirms the intended precision policy:
+  `bits_overrides=blocks.0.:16,blocks.1.:8,blocks.2.:4,blocks.3.:2` and
+  `ternary=blocks.4.,blocks.5.,blocks.6.,blocks.7.,blocks.8.,blocks.9.`.
+- Startup route is correct for r1:
+  `0,1,2,3,4,5,6,7,8,9,4,3,2,1,0`.
