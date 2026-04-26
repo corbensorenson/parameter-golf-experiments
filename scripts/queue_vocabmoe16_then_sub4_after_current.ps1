@@ -40,7 +40,7 @@ $vocabArgs = @(
     "--val-tokens", "131072",
     "--timeout", "9000",
     "--wait-for-idle-gpu",
-    "--idle-max-util", "15",
+    "--idle-max-util", "25",
     "--idle-max-memory-mib", "2500",
     "--idle-seconds", "30"
 )
@@ -62,7 +62,7 @@ $sub4Args = @(
     "--quant-train-every", "100",
     "--allow-over-cap",
     "--wait-for-idle-gpu",
-    "--idle-max-util", "15",
+    "--idle-max-util", "25",
     "--idle-max-memory-mib", "2500",
     "--idle-seconds", "30"
 )
