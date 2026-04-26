@@ -636,6 +636,16 @@ Active follow-up:
   - `i3l3r3_d768e256_q884_coret_lqer_lidx_r6t12`
 - startup check: the first row waited `30.287s` for the idle guard and then
   began training with the GPU at full load.
+- status update:
+  - `i3l3r3_d768e256_q884_coret_lqer_t11` hit the 900s runner timeout before
+    producing final artifacts.
+  - `i3l3r3_d768e256_q884_coret_lqer_r6t14` crashed early with CUDA illegal
+    memory access.
+  - `i3l3r3_d768e256_q884_coret_lqer_r6t12` completed cleanly and is the first
+    clean legal q884 row: final export `2.5749` BPB, `4046` wallclock-stop
+    steps, `148.36ms/step`, `3,967,875` bytes, `32,125` bytes of headroom.
+  - `i3l3r3_d768e256_q884_coret_lqer_lidx_t11` is currently running. At 2k
+    steps it was at `2.6387` BPB and `147.17ms/step`.
 
 ## i5/l5 Precision-Ladder Tail
 
