@@ -689,3 +689,19 @@ Validation:
 - `py_compile` passed for `train_gpt.py`, `train_gpt_ternary.py`, and
   `scripts/run_sub4_iotail_quant_matrix.py`.
 - `--list` shows all r1/r2/r3 i5/l5 precision-ladder candidates.
+
+Queued matrix:
+
+- record dir: `records/sub4-i5l5-precision-ladder-10m-20260425-225433`
+- status: queued behind the active q884 legal/lidx sweep, waiting for runner
+  PID `11936` before starting.
+- rows:
+  - `i5l5r1_d512e192_q16q8q4q2t_coret_lqer_r6t12`
+  - `i5l5r1_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12`
+  - `i5l5r2_d512e192_q16q8q4q2t_coret_lqer_r6t12`
+  - `i5l5r2_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12`
+  - `i5l5r3_d512e192_q16q8q4q2t_coret_lqer_r6t12`
+  - `i5l5r3_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12`
+- settings: 10-minute local wallclock per row, final artifacts,
+  `TRAIN_QUANT_FORWARD=1`, `QUANT_TRAIN_MODE=none`, `--allow-over-cap`, idle
+  guard.
