@@ -769,3 +769,15 @@ Validation:
 
 - `py_compile` passed after adding both r9 candidates.
 - `--list` shows both r9 rows.
+
+Queued matrix:
+
+- record dir: `records/sub4-i3l3r9-loopidx-10m-20260425-234118`
+- status: queued behind the active i5/l5 precision-ladder runner, waiting for
+  PID `31348` before starting.
+- rows:
+  - `i3l3r9_d768e256_q884_coret_lqer_r6t12`
+  - `i3l3r9_d768e256_q884_coret_lqer_lidx_r6t12`
+- settings: 10-minute local wallclock per row, final artifacts,
+  `TRAIN_QUANT_FORWARD=1`, `QUANT_TRAIN_MODE=none`, `--allow-over-cap`, idle
+  guard, runner timeout `1200s` per row.
