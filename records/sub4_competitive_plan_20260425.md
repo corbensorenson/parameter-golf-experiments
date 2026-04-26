@@ -482,3 +482,24 @@ Active fair rerun:
 - first candidate waited `30.311s` and started at `18%` GPU utilization and
   `994MiB` VRAM, so this should be a much cleaner local 2060 wall-clock
   comparison.
+
+Fair rerun completion:
+
+- record dir: `records/sub4-trainquant-fair-wallclock10m-20260425-202436`
+- successful under-cap rows:
+  - `i1l2r2_d896e256_q8_coret_lqer`: `3.8455` final BPB,
+    `8813` wallclock-stop steps, `68.10ms/step`, `2,994,525` bytes,
+    `1,005,475` headroom.
+  - `i1l2r2_d768e256_q8_coret_lqer`: `3.8943` final BPB,
+    `9160` wallclock-stop steps, `65.53ms/step`, `2,955,513` bytes,
+    `1,044,487` headroom.
+- failed/near-miss rows:
+  - `i3l3r2_d768e256_q864_coret_lqer`: CUDA illegal memory access during
+    train-time fake-quant forward, after about `10` logged steps.
+  - `i3l3r3_d768e256_q884_coret_lqer`: strong quality but over cap:
+    `2.5252` train/export proxy BPB, `4114` wallclock-stop steps,
+    `145.88ms/step`, `4,060,837` bytes, `60,837` bytes over cap.
+- Read: the clean fair run says q884-style IO-tail quality is the best signal,
+  but the candidate needs a byte shave before it is legal. The q864 r2 row is
+  not trustworthy until the illegal-memory issue is debugged with
+  `CUDA_LAUNCH_BLOCKING=1`.
