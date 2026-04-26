@@ -547,6 +547,9 @@ Runner changes for the next pass:
   - `i3l3r3_d768e256_q884_coret_lqer_fb3`
   - `i3l3r3_d768e256_q884_coret_lqer_r6`
   - `i3l3r3_d768e256_q884_coret_lqer_t12fb3`
+- Follow-up q884 loop-index rows:
+  - `i3l3r3_d768e256_q884_coret_lqer_lidx`
+  - `i3l3r3_d768e256_q884_coret_lqer_lidx_t12fb3`
 
 Next targeted sweep: rerun q884 as a soft-cap baseline with exact final
 roundtrip, then compare smaller LQER top-K/factor/rank variants. If the smaller
@@ -569,3 +572,14 @@ Active targeted sweep:
   - `i3l3r3_d768e256_q884_coret_lqer_t12fb3`
 - startup check: the first row waited `30.284s` for the idle guard and then
   began training with the GPU at full load.
+- first-row update: the exact q884 soft-cap rerun crashed after the first few
+  logged steps with Windows `0xC0000409` / CUDA illegal memory access reported
+  at RoPE application. This is different from the previous fair q884 completion
+  and should be treated as a local stability/repro issue, not a quality result.
+  The runner continued to the `t12` sidecar row after a fresh idle wait.
+
+Queued follow-up: the best q884 run did not enable
+`HRC_LOOP_INDEX_ENABLED`, even though the looped-middle idea wants virtual-pass
+position information. The trainer already supports a tiny sinusoidal loop-index
+control path, so the next pass should compare the baseline and best byte-shaved
+q884 rows with `HRC_LOOP_INDEX_ENABLED=1`, `HRC_LOOP_INDEX_DIM=32`.
