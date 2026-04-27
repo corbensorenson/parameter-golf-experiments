@@ -31,6 +31,9 @@ train-time quantization, and careful byte spending:
 - **16MB vocabulary MoE probes.** The official-size lane can spend bytes on a
   token-conditioned low-rank expert adapter: each token learns a tiny router
   prior, while shared expert bases keep the CUDA work batched.
+- **Dual-stream advisor probes.** A trained left/right bridge can split the
+  residual features into a token-facing lane and a recurrent lane, then exchange
+  tiny low-rank messages at input, loop-entry, and pre-output sites.
 - **Lossless tokenizer probes.** CaseOps and word-boundary-aware tokenizer
   experiments are tracked separately from architecture changes so byte
   accounting stays auditable.
@@ -65,7 +68,8 @@ priorities, not claim final scores.
 - `scripts/run_sub4_caseops_wide_matrix.py` - wide/shallow CaseOps candidate
   matrix.
 - `scripts/run_16mb_vocab_moe_matrix.py` - 16MB Vocab-MoE control/probe
-  matrix with final artifact round-trip enabled.
+  matrix with final artifact round-trip enabled, including mainline cap-spend
+  and dual-stream advisor candidate groups.
 - `scripts/bench_packed_ternary_linear.py` - benchmark harness for packed
   ternary linear experiments.
 - `scripts/check_cuda126_env.py` and `scripts/use_cuda126.ps1` - local CUDA
@@ -143,6 +147,22 @@ Run the selective 16MB cap-speed scout after the active queue:
 .\scripts\queue_16mb_cap_speed_after_current.ps1 -WaitPid <queue_pid>
 ```
 
+List the two next 16MB candidate families:
+
+```bash
+python scripts/run_16mb_vocab_moe_matrix.py --candidate-group cap16_mainline --list
+python scripts/run_16mb_vocab_moe_matrix.py --candidate-group cap16_dual_stream --list
+```
+
+Queue the mainline scout after an existing queue process. Add `-RunDual` only
+after the cap-speed/mainline evidence says the extra dual-stream matmuls are
+worth spending GPU time on:
+
+```powershell
+.\scripts\queue_16mb_mainline_dual_after_current.ps1 -WaitPid <queue_pid>
+.\scripts\queue_16mb_mainline_dual_after_current.ps1 -WaitPid <queue_pid> -RunDual
+```
+
 Run the focused spike/self-election Vocab-MoE matrix only if the two corrected
 spike probes in the active pruned queue look promising:
 
@@ -181,6 +201,9 @@ python scripts/bench_packed_ternary_linear.py
   keeps Vocab-MoE train/export precision aligned for truthful matrix scores.
 - `TRAIN_FUSED_QKV=1`, `USE_GRAD_SCALER=0`, `MUON_DTYPE=fp16` - speed probes
   carried from sub-4 into sub-16.
+- `DUAL_STREAM_ENABLED=1` plus `DUAL_STREAM_LEFT_DIM`, `DUAL_STREAM_RANK`, and
+  `DUAL_STREAM_SITES=input,loop_first,pre_output` - trained left/right advisor
+  bridge for 16MB candidates.
 
 ## What Is Not Included
 

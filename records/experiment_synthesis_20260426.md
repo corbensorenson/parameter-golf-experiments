@@ -114,6 +114,12 @@ engineering interpretation.
   RLM-lite variants did not beat it after export. The next selective scout is
   `cap16_speed`, which applies the sub-4 speed profile, QK 5.25, LQER r12/t24,
   and d768 width/embedding/unique-loop spends under the official 16MB cap.
+- 2026-04-27 setup update: two next-stage groups are now runnable. `cap16_mainline`
+  spends the cap on d768/d896, e384, VocabMoE input+loop-first, QK 5.25, LQER
+  r16/t32 on blocks plus factored embedding projections, and q6/q4 taper probes.
+  `cap16_dual_stream` adds a trained low-rank left/right advisor bridge at input,
+  loop-entry, and pre-output sites so the dual-brain idea is trained end-to-end
+  rather than added as eval-only council.
 
 ## Tokenizer Lessons
 

@@ -114,6 +114,14 @@ class Hyperparameters:
     vocab_moe_spike_top_k = int(os.environ.get("VOCAB_MOE_SPIKE_TOP_K", "0"))
     vocab_moe_spike_ste = bool(int(os.environ.get("VOCAB_MOE_SPIKE_STE", "1")))
     vocab_moe_spike_normalize = bool(int(os.environ.get("VOCAB_MOE_SPIKE_NORMALIZE", "1")))
+    dual_stream_enabled = bool(int(os.environ.get("DUAL_STREAM_ENABLED", "0")))
+    dual_stream_left_dim = int(os.environ.get("DUAL_STREAM_LEFT_DIM", "0"))
+    dual_stream_rank = int(os.environ.get("DUAL_STREAM_RANK", "16"))
+    dual_stream_sites = os.environ.get("DUAL_STREAM_SITES", "input,loop_first").strip()
+    dual_stream_scale_init = float(os.environ.get("DUAL_STREAM_SCALE_INIT", "0.02"))
+    dual_stream_down_init_std = float(os.environ.get("DUAL_STREAM_DOWN_INIT_STD", "0.02"))
+    dual_stream_up_init_std = float(os.environ.get("DUAL_STREAM_UP_INIT_STD", "0.001"))
+    dual_stream_activation = os.environ.get("DUAL_STREAM_ACTIVATION", "silu").strip().lower()
     depth_lora_rank = int(os.environ.get("DEPTH_LORA_RANK", "0"))
     hrc_mirror_mode = os.environ.get("HRC_MIRROR_MODE", "signperm").strip().lower()
     hrc_depth_schedule_mode = os.environ.get("HRC_DEPTH_SCHEDULE_MODE", "cycle").strip().lower()
@@ -1047,7 +1055,8 @@ CONTROL_TENSOR_NAME_PATTERNS = tuple(
             "council_entropy_sharpness,"
             "rlm_memory_scale,"
             "cycle_fuse_weights,cycle_fuse_tap_scales,"
-            "vocab_moe.scale,vocab_moe_site_bias,vocab_moe_site_scales"
+            "vocab_moe.scale,vocab_moe_site_bias,vocab_moe_site_scales,"
+            "dual_stream_bridge.site_scales"
         ),
     ).split(",")
     if pattern
@@ -1148,6 +1157,21 @@ if Hyperparameters.vocab_moe_train_quant_bits not in {0, *SUPPORTED_LINEAR_QUANT
     )
 if Hyperparameters.vocab_moe_spike_top_k < 0:
     raise ValueError(f"VOCAB_MOE_SPIKE_TOP_K must be >= 0, got {Hyperparameters.vocab_moe_spike_top_k}")
+if Hyperparameters.dual_stream_enabled:
+    if not (0 < Hyperparameters.dual_stream_left_dim < Hyperparameters.model_dim):
+        raise ValueError(
+            "DUAL_STREAM_LEFT_DIM must be in (0, MODEL_DIM) when DUAL_STREAM_ENABLED=1, "
+            f"got {Hyperparameters.dual_stream_left_dim} for MODEL_DIM={Hyperparameters.model_dim}"
+        )
+    if Hyperparameters.dual_stream_rank <= 0:
+        raise ValueError(f"DUAL_STREAM_RANK must be positive, got {Hyperparameters.dual_stream_rank}")
+    if not Hyperparameters.dual_stream_sites:
+        raise ValueError("DUAL_STREAM_SITES must select at least one bridge site")
+    if Hyperparameters.dual_stream_activation not in {"relu2", "silu", "gelu", "identity"}:
+        raise ValueError(
+            "DUAL_STREAM_ACTIVATION must be one of relu2|silu|gelu|identity, "
+            f"got {Hyperparameters.dual_stream_activation!r}"
+        )
 if INT8_KEEP_FLOAT_MAX_NUMEL < 0:
     raise ValueError(f"INT8_KEEP_FLOAT_MAX_NUMEL must be >= 0, got {INT8_KEEP_FLOAT_MAX_NUMEL}")
 if Hyperparameters.quant_ternary_group_size <= 0:
@@ -3101,6 +3125,61 @@ class VocabMoELite(nn.Module):
         if site_scale is not None:
             scale = scale * site_scale.to(dtype=x.dtype)
         return x + scale * delta
+
+
+class DualStreamBridge(nn.Module):
+    """Low-rank cross-advice between token-facing and recurrent feature lanes."""
+
+    def __init__(
+        self,
+        dim: int,
+        left_dim: int,
+        rank: int,
+        num_sites: int,
+        scale_init: float = 0.02,
+        down_init_std: float = 0.02,
+        up_init_std: float = 0.001,
+        activation: str = "silu",
+    ):
+        super().__init__()
+        self.dim = int(dim)
+        self.left_dim = int(left_dim)
+        self.right_dim = self.dim - self.left_dim
+        self.rank = int(rank)
+        self.num_sites = int(num_sites)
+        self.activation = str(activation).strip().lower()
+        self.left_down = CastedLinear(self.left_dim, self.rank, bias=False)
+        self.left_up = CastedLinear(self.rank, self.right_dim, bias=False)
+        self.right_down = CastedLinear(self.right_dim, self.rank, bias=False)
+        self.right_up = CastedLinear(self.rank, self.left_dim, bias=False)
+        self.site_scales = nn.Parameter(
+            torch.full((self.num_sites, 2), float(scale_init), dtype=torch.float32)
+        )
+        nn.init.normal_(self.left_down.weight, mean=0.0, std=float(down_init_std))
+        nn.init.normal_(self.right_down.weight, mean=0.0, std=float(down_init_std))
+        nn.init.normal_(self.left_up.weight, mean=0.0, std=float(up_init_std))
+        nn.init.normal_(self.right_up.weight, mean=0.0, std=float(up_init_std))
+
+    def _activate(self, x: Tensor) -> Tensor:
+        if self.activation == "relu2":
+            x = F.relu(x)
+            return x * x
+        if self.activation == "gelu":
+            return F.gelu(x)
+        if self.activation == "identity":
+            return x
+        return F.silu(x)
+
+    def forward(self, x: Tensor, site_slot: int) -> Tensor:
+        left, right = x[..., : self.left_dim], x[..., self.left_dim :]
+        left_norm = F.rms_norm(left, (self.left_dim,))
+        right_norm = F.rms_norm(right, (self.right_dim,))
+        left_to_right = self.left_up(self._activate(self.left_down(left_norm)))
+        right_to_left = self.right_up(self._activate(self.right_down(right_norm)))
+        scales = self.site_scales[int(site_slot)].to(dtype=x.dtype)
+        left = left + scales[0] * right_to_left.to(dtype=left.dtype)
+        right = right + scales[1] * left_to_right.to(dtype=right.dtype)
+        return torch.cat((left, right), dim=-1)
 def restore_low_dim_params_to_fp32(module: nn.Module) -> None:
     # Keep small/control parameters in fp32 even when the model body runs in bf16.
     with torch.no_grad():
@@ -3874,6 +3953,14 @@ class GPT(nn.Module):
         vocab_moe_spike_top_k: int = 0,
         vocab_moe_spike_ste: bool = True,
         vocab_moe_spike_normalize: bool = True,
+        dual_stream_enabled: bool = False,
+        dual_stream_left_dim: int = 0,
+        dual_stream_rank: int = 16,
+        dual_stream_sites: str = "input,loop_first",
+        dual_stream_scale_init: float = 0.02,
+        dual_stream_down_init_std: float = 0.02,
+        dual_stream_up_init_std: float = 0.001,
+        dual_stream_activation: str = "silu",
         smear_gate_enabled: bool = False,
         smear_gate_width: int = 12,
         smear_gate_mode: str = "vector",
@@ -4029,6 +4116,16 @@ class GPT(nn.Module):
         self.vocab_moe_layer_index_to_slot: dict[int, int] = {}
         self.vocab_moe_site_bias: nn.Parameter | None = None
         self.vocab_moe_site_scales: nn.Parameter | None = None
+        self.dual_stream_enabled = bool(dual_stream_enabled)
+        self.dual_stream_left_dim = int(dual_stream_left_dim)
+        self.dual_stream_rank = int(dual_stream_rank)
+        self.dual_stream_site_names = tuple(
+            item.strip().lower() for item in str(dual_stream_sites).split(",") if item.strip()
+        )
+        self.dual_stream_bridge: DualStreamBridge | None = None
+        self.dual_stream_input_slot: int | None = None
+        self.dual_stream_pre_output_slot: int | None = None
+        self.dual_stream_layer_index_to_slot: dict[int, int] = {}
         self.num_encoder_layers = total_layers // 2
         self.num_decoder_layers = total_layers - self.num_encoder_layers
         self.num_skip_weights = min(self.num_encoder_layers, self.num_decoder_layers)
@@ -4499,6 +4596,65 @@ class GPT(nn.Module):
                 self.vocab_moe_site_scales = nn.Parameter(
                     torch.full((slot,), float(vocab_moe_site_scale_init), dtype=torch.float32)
                 )
+        if self.dual_stream_enabled:
+            if not (0 < self.dual_stream_left_dim < model_dim):
+                raise ValueError(
+                    f"DUAL_STREAM_LEFT_DIM must be in (0, MODEL_DIM={model_dim}), got {self.dual_stream_left_dim}"
+                )
+            supported_sites = {"input", "loop_first", "loop_exit", "pre_output", "output"}
+            unknown_sites = [site for site in self.dual_stream_site_names if site not in supported_sites]
+            if unknown_sites:
+                raise ValueError(
+                    "DUAL_STREAM_SITES supports input|loop_first|loop_exit|pre_output|output, "
+                    f"got {','.join(unknown_sites)}"
+                )
+            slot = 0
+
+            def add_layer_site(layer_idx: int) -> None:
+                nonlocal slot
+                if int(layer_idx) not in self.dual_stream_layer_index_to_slot:
+                    self.dual_stream_layer_index_to_slot[int(layer_idx)] = slot
+                    slot += 1
+
+            for site in self.dual_stream_site_names:
+                if site == "input":
+                    if self.dual_stream_input_slot is None:
+                        self.dual_stream_input_slot = slot
+                        slot += 1
+                    continue
+                if site in {"pre_output", "output"}:
+                    if self.dual_stream_pre_output_slot is None:
+                        self.dual_stream_pre_output_slot = slot
+                        slot += 1
+                    continue
+                if site == "loop_first":
+                    layer_idx = 0
+                    if self.is_hrc:
+                        for pos, block_idx in enumerate(self.block_schedule):
+                            if int(block_idx) >= int(self.hrc_recursive_core_start):
+                                layer_idx = int(pos)
+                                break
+                    add_layer_site(layer_idx)
+                    continue
+                if site == "loop_exit":
+                    layer_idx = total_layers - 1
+                    if self.is_hrc:
+                        for pos, block_idx in enumerate(self.block_schedule):
+                            if int(block_idx) >= int(self.hrc_recursive_core_start):
+                                layer_idx = int(pos)
+                    add_layer_site(layer_idx)
+            if slot <= 0:
+                raise ValueError("DUAL_STREAM_ENABLED=1 but no bridge sites were resolved")
+            self.dual_stream_bridge = DualStreamBridge(
+                model_dim,
+                self.dual_stream_left_dim,
+                self.dual_stream_rank,
+                slot,
+                scale_init=dual_stream_scale_init,
+                down_init_std=dual_stream_down_init_std,
+                up_init_std=dual_stream_up_init_std,
+                activation=dual_stream_activation,
+            )
         self.blocks = nn.ModuleList(blocks)
         self.final_norm = RMSNorm()
         self.lm_head = None if tie_embeddings else CastedLinear(model_dim, vocab_size, bias=False)
@@ -4547,6 +4703,21 @@ class GPT(nn.Module):
         site_bias = self.vocab_moe_site_bias[slot] if self.vocab_moe_site_bias is not None else None
         site_scale = self.vocab_moe_site_scales[slot] if self.vocab_moe_site_scales is not None else None
         return self.vocab_moe(x, input_ids, site_bias=site_bias, site_scale=site_scale)
+    def _apply_dual_stream(self, x: Tensor, layer_idx: int | None) -> Tensor:
+        if self.dual_stream_bridge is None:
+            return x
+        if layer_idx is None:
+            if self.dual_stream_input_slot is None:
+                return x
+            return self.dual_stream_bridge(x, self.dual_stream_input_slot)
+        slot = self.dual_stream_layer_index_to_slot.get(int(layer_idx))
+        if slot is None:
+            return x
+        return self.dual_stream_bridge(x, slot)
+    def _apply_dual_stream_pre_output(self, x: Tensor) -> Tensor:
+        if self.dual_stream_bridge is None or self.dual_stream_pre_output_slot is None:
+            return x
+        return self.dual_stream_bridge(x, self.dual_stream_pre_output_slot)
     def rlm_memory_active(self) -> bool:
         return self.rlm_memory_enabled and ((not self.training) or self.rlm_memory_train_enabled)
     def reset_rlm_memory(self) -> None:
@@ -4830,6 +5001,7 @@ class GPT(nn.Module):
         if self.token_smear is not None:
             x = self.token_smear(x)
         x = self._apply_vocab_moe(x, input_ids, None)
+        x = self._apply_dual_stream(x, None)
         x = self._apply_rlm_memory(x, "input")
         ve_cache: Tensor | None = None
         def ve_for_layer(layer_idx: int) -> Tensor | None:
@@ -4886,6 +5058,7 @@ class GPT(nn.Module):
             x = self._apply_recur_injection(layer_idx, prev_x, x, x0)
             x = self._apply_frozen_carry(layer_idx, block_idx, x, frozen_carry_states)
             x = self._apply_vocab_moe(x, input_ids, layer_idx)
+            x = self._apply_dual_stream(x, layer_idx)
             if route_tap_states is not None and layer_idx in self.cycle_fuse_tap_position_to_slot:
                 route_tap_states[layer_idx] = x
             skips.append(x)
@@ -4928,8 +5101,10 @@ class GPT(nn.Module):
             x = self._apply_recur_injection(layer_idx, prev_x, x, x0)
             x = self._apply_frozen_carry(layer_idx, block_idx, x, frozen_carry_states)
             x = self._apply_vocab_moe(x, input_ids, layer_idx)
+            x = self._apply_dual_stream(x, layer_idx)
             if route_tap_states is not None and layer_idx in self.cycle_fuse_tap_position_to_slot:
                 route_tap_states[layer_idx] = x
+        x = self._apply_dual_stream_pre_output(x)
         return self.final_norm(x)
     def _project_hidden(self, x: Tensor, peer_mode: str, depth_limit: int) -> Tensor:
         output_peer_mode = self._output_peer_mode(peer_mode, depth_limit)
@@ -5169,6 +5344,7 @@ class GPT(nn.Module):
         if self.token_smear is not None:
             x = self.token_smear(x)
         x = self._apply_vocab_moe(x, input_ids, None)
+        x = self._apply_dual_stream(x, None)
         ve_cache: Tensor | None = None
         def ve_for_layer(layer_idx: int) -> Tensor | None:
             nonlocal ve_cache
@@ -5187,6 +5363,7 @@ class GPT(nn.Module):
             for i in range(self.num_encoder_layers):
                 x = self.blocks[i](x, x0, v_embed=ve_for_layer(i), use_qsparse_override=self.qsparse_layer_flags[i])
                 x = self._apply_vocab_moe(x, input_ids, i)
+                x = self._apply_dual_stream(x, i)
                 skips.append(x)
             for i in range(self.num_decoder_layers):
                 if skips:
@@ -5194,6 +5371,8 @@ class GPT(nn.Module):
                 vi = self.num_encoder_layers + i
                 x = self.blocks[vi](x, x0, v_embed=ve_for_layer(vi), use_qsparse_override=self.qsparse_layer_flags[vi])
                 x = self._apply_vocab_moe(x, input_ids, vi)
+                x = self._apply_dual_stream(x, vi)
+        x = self._apply_dual_stream_pre_output(x)
         x = self.final_norm(x)
         ntp_loss = self._hidden_ntp_loss(x, target_ids, token_weights=token_weights)
         if not self.mtp_enabled or mtp_weights is None or self.mtp_head_t2 is None or self.mtp_head_t3 is None:
@@ -5541,6 +5720,14 @@ def main() -> None:
         vocab_moe_spike_top_k=args.vocab_moe_spike_top_k,
         vocab_moe_spike_ste=args.vocab_moe_spike_ste,
         vocab_moe_spike_normalize=args.vocab_moe_spike_normalize,
+        dual_stream_enabled=args.dual_stream_enabled,
+        dual_stream_left_dim=args.dual_stream_left_dim,
+        dual_stream_rank=args.dual_stream_rank,
+        dual_stream_sites=args.dual_stream_sites,
+        dual_stream_scale_init=args.dual_stream_scale_init,
+        dual_stream_down_init_std=args.dual_stream_down_init_std,
+        dual_stream_up_init_std=args.dual_stream_up_init_std,
+        dual_stream_activation=args.dual_stream_activation,
         smear_gate_enabled=args.smear_gate_enabled,
         smear_gate_width=args.smear_gate_width,
         smear_gate_mode=args.smear_gate_mode,
@@ -5828,6 +6015,16 @@ def main() -> None:
         f"spike_top_k:{args.vocab_moe_spike_top_k} "
         f"spike_ste:{int(args.vocab_moe_spike_ste)} "
         f"spike_normalize:{int(args.vocab_moe_spike_normalize)}"
+    )
+    log0(
+        f"dual_stream_enabled:{int(args.dual_stream_enabled)} "
+        f"left_dim:{args.dual_stream_left_dim} "
+        f"right_dim:{args.model_dim - args.dual_stream_left_dim if args.dual_stream_enabled else 0} "
+        f"rank:{args.dual_stream_rank} sites:{args.dual_stream_sites or 'none'} "
+        f"resolved_input:{getattr(base_model, 'dual_stream_input_slot', None)} "
+        f"resolved_layers:{','.join(str(k) for k in sorted(getattr(base_model, 'dual_stream_layer_index_to_slot', {}).keys())) or 'none'} "
+        f"resolved_pre_output:{getattr(base_model, 'dual_stream_pre_output_slot', None)} "
+        f"scale_init:{args.dual_stream_scale_init:g} activation:{args.dual_stream_activation}"
     )
     log0(
         f"basis_xsa_enabled:{args.basis_xsa_enabled} basis_rank:{args.basis_rank} "

@@ -57,6 +57,11 @@ The short current read:
   dense VocabMoE placement with sub-4 speed levers, QK 5.25, LQER r12/t24, and
   selective d768 width/embedding/unique-loop spends under the official 16MB
   cap.
+- New 16MB setup groups:
+  `cap16_mainline` spends the cap on d768/d896 width, e384 embeddings, q6/q4
+  taper variants, QK 5.25, stronger LQER, and VocabMoE input+loop-first.
+  `cap16_dual_stream` adds an opt-in trained left/right advisor bridge on top
+  of that spine.
 - Next prepared matrix group:
   `sub4_leader_levers` in `scripts/run_sub4_iotail_quant_matrix.py`, covering
   QK gain, scalar SmearGate, attention-output gates, sparse attention gates,
@@ -373,6 +378,88 @@ Decision:
 - If d768/e320 wins over d768/e256, embeddings are still the bottleneck.
 - If i3/l5/r2 wins, unique loop diversity is more valuable than more recurrence
   at this cap.
+
+## 16MB Mainline Cap-Spend
+
+Goal: make the highest-confidence 16MB family runnable without hand-editing
+env vars.
+
+Runner group: `--candidate-group cap16_mainline` in
+`scripts/run_16mb_vocab_moe_matrix.py`.
+
+Ingredients:
+
+- Lossless CaseOps/SP8192 data and byte sidecars.
+- HRC mirrored IO tail plus looped middle.
+- Train-time quantized forward, not export-only quantization.
+- q6 default weights, with explicit q8/q6/q6 IO-tail and q4 recurrent-core
+  taper rows.
+- Factored tied embeddings at e320/e384.
+- VocabMoE at `input,loop_first`.
+- QK gain `5.25`.
+- LQER r16/t32 for richer quantization-error repair on block matrices and the
+  factored embedding projections.
+- The sub-4 speed profile: fp16 params, fp16 Muon, fused QKV, no GradScaler,
+  no post-step grad zeroing, and no avoidable fp32 cast path.
+
+Rows:
+
+- `mainline_i3l3r3_d768e384_q6all_vocabmoe_qk525_lqer16t32`
+- `mainline_i3l3r3_d896e384_q6all_vocabmoe_qk525_lqer16t32`
+- `mainline_i3l5r2_d768e320_q6all_vocabmoe_qk525_lqer16t32`
+- `mainline_i3l5r2_d768e320_q8q6q6_q4core_vocabmoe_qk525_lqer16t32`
+- `mainline_i3l5r2_d896e384_q8q6q6_q4core_vocabmoe_qk525_lqer16t32`
+
+Decision:
+
+- If q6-all width rows win, quality is still width/embedding bound.
+- If q4-core taper rows win, the IO-tail precision ladder is transferable to
+  the 16MB family.
+- If d896 is unstable or too slow locally, keep d768 as the local iteration
+  default and reserve d896 for H100s.
+
+## 16MB Dual-Stream Advisor
+
+Goal: test the left/right-brain idea as a trained architecture, not an
+eval-only council.
+
+Implementation:
+
+- `DUAL_STREAM_ENABLED=1` creates a low-rank `DualStreamBridge`.
+- The residual feature vector is split into a token-facing left lane and a
+  recurrent/semantic right lane.
+- At selected sites, the bridge sends low-rank messages in both directions:
+  left-to-right and right-to-left. The output remains one residual stream and
+  one legal normalized distribution.
+- Sites are resolved by `DUAL_STREAM_SITES`, currently supporting
+  `input`, `loop_first`, `loop_exit`, and `pre_output`.
+
+Knobs:
+
+- `DUAL_STREAM_LEFT_DIM`
+- `DUAL_STREAM_RANK`
+- `DUAL_STREAM_SITES`
+- `DUAL_STREAM_SCALE_INIT`
+- `DUAL_STREAM_ACTIVATION`
+
+Runner group: `--candidate-group cap16_dual_stream`.
+
+Rows:
+
+- `dual_i3l3r3_d768e320_left256_q6all_vocabmoe_qk525_lqer12t24`
+- `dual_i3l3r3_d768e320_left320_q6all_vocabmoe_qk525_lqer12t24`
+- `dual_i3l5r2_d768e320_left256_q6all_vocabmoe_qk525_lqer16t32`
+- `dual_i3l5r2_d896e384_left320_q8q6q6_q4core_vocabmoe_qk525_lqer16t32`
+
+Decision:
+
+- Run dual rows only after cap-speed/mainline evidence says the extra matmuls
+  are worth the local GPU time.
+- Compare dual rows only against matching single-stream mainline rows. If the
+  bridge does not beat the same spine, freeze it.
+- If left320 beats left256, surface/token precision needs more width.
+- If i3/l5/r2 dual wins, the bridge helps most when the loop has more unique
+  physical blocks.
 
 ## 16MB Spiking / Self-Election Vocab-MoE
 

@@ -82,6 +82,14 @@ BASE_16MB: dict[str, str] = {
 }
 
 
+def block_patterns(start: int, stop: int) -> str:
+    return ",".join(f"blocks.{idx}." for idx in range(start, stop))
+
+
+def quant_bits(*pairs: tuple[int, int]) -> str:
+    return ",".join(f"blocks.{idx}.:{bits}" for idx, bits in pairs)
+
+
 CAP16_SPEED_COMMON: dict[str, str] = {
     **SUB16_PORTED_FAST_LOOP,
     # Make the low-precision path truthful from the first forward pass while
@@ -113,6 +121,61 @@ def cap16_speed_base(
         "MODEL_DIM": str(model_dim),
         "NUM_HEADS": str(model_dim // 64),
         "FACTORED_EMBED_DIM": str(embed_dim),
+    }
+
+
+def cap16_taper_env(
+    *,
+    io_width: int,
+    loop_width: int,
+    io_bits: tuple[int, ...],
+    core_bits: int = 4,
+) -> dict[str, str]:
+    if len(io_bits) != io_width:
+        raise ValueError("io_bits must provide one entry per IO-tail unique block")
+    unique_blocks = int(io_width) + int(loop_width)
+    return {
+        "QUANT_WEIGHT_BITS": "6",
+        "QUANT_BITS_OVERRIDES": quant_bits(
+            *[(idx, bits) for idx, bits in enumerate(io_bits)],
+            *[(idx, core_bits) for idx in range(io_width, unique_blocks)],
+        ),
+        "LQER_INCLUDE_PATTERNS": "blocks.,embed_proj",
+        "LQER_EXCLUDE_PATTERNS": (
+            "tok_emb.weight,lm_head.weight,token_smear,attn_gate_w,attn_out_gate,"
+            "vocab_moe,dual_stream"
+        ),
+    }
+
+
+def cap16_lqer_env(rank: int, top_k: int) -> dict[str, str]:
+    return {
+        "LQER_RANK": str(rank),
+        "LQER_TOP_K": str(top_k),
+        "LQER_INCLUDE_PATTERNS": "blocks.,embed_proj",
+        "LQER_EXCLUDE_PATTERNS": (
+            "tok_emb.weight,lm_head.weight,token_smear,attn_gate_w,attn_out_gate,"
+            "vocab_moe,dual_stream"
+        ),
+    }
+
+
+def dual_stream_env(
+    *,
+    left_dim: int,
+    rank: int = 16,
+    sites: str = "input,loop_first,pre_output",
+    scale: float = 0.02,
+) -> dict[str, str]:
+    return {
+        "DUAL_STREAM_ENABLED": "1",
+        "DUAL_STREAM_LEFT_DIM": str(left_dim),
+        "DUAL_STREAM_RANK": str(rank),
+        "DUAL_STREAM_SITES": sites,
+        "DUAL_STREAM_SCALE_INIT": f"{scale:g}",
+        "DUAL_STREAM_DOWN_INIT_STD": "0.02",
+        "DUAL_STREAM_UP_INIT_STD": "0.001",
+        "DUAL_STREAM_ACTIVATION": "silu",
     }
 
 
@@ -702,13 +765,116 @@ CAP16_SPEED_CANDIDATES: list[dict[str, Any]] = [
 ]
 
 
+CAP16_MAINLINE_CANDIDATES: list[dict[str, Any]] = [
+    {
+        "name": "mainline_i3l3r3_d768e384_q6all_vocabmoe_qk525_lqer16t32",
+        "env": {
+            **cap16_speed_base(model_dim=768, embed_dim=384),
+            **cap16_lqer_env(16, 32),
+            **BEST_CLEAN_VOCABMOE,
+        },
+        "notes": "mainline width/embedding spend: q6 throughout, e384, QK 5.25, VocabMoE input+loop-first, LQER r16/t32",
+    },
+    {
+        "name": "mainline_i3l3r3_d896e384_q6all_vocabmoe_qk525_lqer16t32",
+        "env": {
+            **cap16_speed_base(model_dim=896, embed_dim=384),
+            **cap16_lqer_env(16, 32),
+            **BEST_CLEAN_VOCABMOE,
+        },
+        "notes": "larger residual-width spend under the 16MB cap; useful if d768 is not memory-bound locally",
+    },
+    {
+        "name": "mainline_i3l5r2_d768e320_q6all_vocabmoe_qk525_lqer16t32",
+        "env": {
+            **cap16_speed_base(model_dim=768, embed_dim=320, io_width=3, loop_width=5, repeats=2),
+            **cap16_lqer_env(16, 32),
+            **BEST_CLEAN_VOCABMOE,
+        },
+        "notes": "tests more unique loop blocks with the full mainline stack but no q4 pressure",
+    },
+    {
+        "name": "mainline_i3l5r2_d768e320_q8q6q6_q4core_vocabmoe_qk525_lqer16t32",
+        "env": {
+            **cap16_speed_base(model_dim=768, embed_dim=320, io_width=3, loop_width=5, repeats=2),
+            **cap16_taper_env(io_width=3, loop_width=5, io_bits=(8, 6, 6), core_bits=4),
+            **cap16_lqer_env(16, 32),
+            **BEST_CLEAN_VOCABMOE,
+        },
+        "notes": "explicit q8/q6/q6 IO-tail and q4 recurrent-core taper from the first forward pass",
+    },
+    {
+        "name": "mainline_i3l5r2_d896e384_q8q6q6_q4core_vocabmoe_qk525_lqer16t32",
+        "env": {
+            **cap16_speed_base(model_dim=896, embed_dim=384, io_width=3, loop_width=5, repeats=2),
+            **cap16_taper_env(io_width=3, loop_width=5, io_bits=(8, 6, 6), core_bits=4),
+            **cap16_lqer_env(16, 32),
+            **BEST_CLEAN_VOCABMOE,
+        },
+        "notes": "quality-first d896 version of the precision-tapered unique-loop mainline",
+    },
+]
+
+
+CAP16_DUAL_STREAM_CANDIDATES: list[dict[str, Any]] = [
+    {
+        "name": "dual_i3l3r3_d768e320_left256_q6all_vocabmoe_qk525_lqer12t24",
+        "env": {
+            **cap16_speed_base(model_dim=768, embed_dim=320),
+            **BEST_CLEAN_VOCABMOE,
+            **dual_stream_env(left_dim=256, rank=16),
+        },
+        "notes": "trained left/right advisor bridge on the d768/e320 VocabMoE spine; q6 throughout",
+    },
+    {
+        "name": "dual_i3l3r3_d768e320_left320_q6all_vocabmoe_qk525_lqer12t24",
+        "env": {
+            **cap16_speed_base(model_dim=768, embed_dim=320),
+            **BEST_CLEAN_VOCABMOE,
+            **dual_stream_env(left_dim=320, rank=16),
+        },
+        "notes": "same spine, more token-facing left lane; tests whether surface precision needs more width",
+    },
+    {
+        "name": "dual_i3l5r2_d768e320_left256_q6all_vocabmoe_qk525_lqer16t32",
+        "env": {
+            **cap16_speed_base(model_dim=768, embed_dim=320, io_width=3, loop_width=5, repeats=2),
+            **cap16_lqer_env(16, 32),
+            **BEST_CLEAN_VOCABMOE,
+            **dual_stream_env(left_dim=256, rank=16),
+        },
+        "notes": "dual-stream advisor on the more-unique-loop mainline; no q4 taper yet",
+    },
+    {
+        "name": "dual_i3l5r2_d896e384_left320_q8q6q6_q4core_vocabmoe_qk525_lqer16t32",
+        "env": {
+            **cap16_speed_base(model_dim=896, embed_dim=384, io_width=3, loop_width=5, repeats=2),
+            **cap16_taper_env(io_width=3, loop_width=5, io_bits=(8, 6, 6), core_bits=4),
+            **cap16_lqer_env(16, 32),
+            **BEST_CLEAN_VOCABMOE,
+            **dual_stream_env(left_dim=320, rank=24),
+        },
+        "notes": "quality-first dual-stream row: larger width, q4 recurrent taper, stronger bridge rank",
+    },
+]
+
+
 CANDIDATE_GROUPS: dict[str, list[dict[str, Any]]] = {
     "default": CANDIDATES,
     "vocabmoe": CANDIDATES,
     "vocabmoe_spike": SPIKE_CANDIDATES,
     "council_rlm": COUNCIL_RLM_CANDIDATES,
     "cap16_speed": CAP16_SPEED_CANDIDATES,
-    "all": CANDIDATES + SPIKE_CANDIDATES + COUNCIL_RLM_CANDIDATES + CAP16_SPEED_CANDIDATES,
+    "cap16_mainline": CAP16_MAINLINE_CANDIDATES,
+    "cap16_dual_stream": CAP16_DUAL_STREAM_CANDIDATES,
+    "all": (
+        CANDIDATES
+        + SPIKE_CANDIDATES
+        + COUNCIL_RLM_CANDIDATES
+        + CAP16_SPEED_CANDIDATES
+        + CAP16_MAINLINE_CANDIDATES
+        + CAP16_DUAL_STREAM_CANDIDATES
+    ),
 }
 
 
@@ -776,6 +942,14 @@ def write_candidate_plan(out_dir: Path, candidates: list[dict[str, Any]], iterat
                 f"{env.get('RLM_MEMORY_INJECT')} decay={env.get('RLM_MEMORY_DECAY')} "
                 f"scale={env.get('RLM_MEMORY_SCALE_INIT')}"
             )
+        if env.get("DUAL_STREAM_ENABLED") == "1":
+            extras.append(
+                "dual="
+                f"left={env.get('DUAL_STREAM_LEFT_DIM')} rank={env.get('DUAL_STREAM_RANK')} "
+                f"sites={env.get('DUAL_STREAM_SITES')} scale={env.get('DUAL_STREAM_SCALE_INIT')}"
+            )
+        if env.get("QUANT_BITS_OVERRIDES"):
+            extras.append(f"bits={env.get('QUANT_BITS_OVERRIDES')}")
         if extras:
             moe = f"{moe}; " + "; ".join(extras)
         lines.append(f"| `{candidate['name']}` | `{route}` | `{moe}` | {candidate['notes']} |")
