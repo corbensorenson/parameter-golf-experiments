@@ -163,10 +163,10 @@ worth spending GPU time on:
 .\scripts\queue_16mb_mainline_dual_after_current.ps1 -WaitPid <queue_pid> -RunDual
 ```
 
-For unattended overnight work, queue the selective tail after the mainline
-scout. It reads the finished cap-speed/mainline CSVs, reruns only the best
-export-roundtrip candidates for longer, and runs dual-stream canaries only if a
-mainline scout clears the configured BPB threshold:
+For unattended queue fill, queue the selective 5k exploration tail after the
+mainline scout. It reads the finished cap-speed/mainline CSVs, reruns only the
+best export-roundtrip candidates at 5k steps, and runs dual-stream canaries only
+if a mainline scout clears the configured BPB threshold:
 
 ```powershell
 .\scripts\queue_16mb_selective_overnight.ps1 -WaitPid <mainline_queue_pid>

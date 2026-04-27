@@ -1,8 +1,9 @@
 param(
     [string] $Root = "C:\Users\corbe\Documents\golf\workspace\parameter-golf",
     [int] $WaitPid = 0,
-    [int] $LongIterations = 10000,
-    [int] $TopK = 3,
+    [int] $LongIterations = 5000,
+    [int] $TopK = 6,
+    [int] $DualIterations = 5000,
     [double] $DualThresholdBpb = 1.95
 )
 
@@ -49,7 +50,7 @@ function Latest-TrainCsv {
 }
 
 if ($WaitPid -gt 0) {
-    Write-QueueLog "waiting for pid=$WaitPid before launching selective overnight queue"
+    Write-QueueLog "waiting for pid=$WaitPid before launching selective 5k exploration queue"
     while (Get-Process -Id $WaitPid -ErrorAction SilentlyContinue) {
         Start-Sleep -Seconds 30
     }
@@ -105,8 +106,8 @@ if ($rows.Count -eq 0) {
 }
 
 $selectedCsv = ($selected -join ",")
-$longOut = Join-Path $Root "records\cap16-selected-long-${LongIterations}-auto-$stamp"
-Write-QueueLog "starting selected long queue out=$longOut candidates=$selectedCsv"
+$longOut = Join-Path $Root "records\cap16-selected-5k-explore-${LongIterations}-auto-$stamp"
+Write-QueueLog "starting selected 5k exploration queue out=$longOut candidates=$selectedCsv"
 $longArgs = @(
     "scripts\run_16mb_vocab_moe_matrix.py",
     "--candidate-group", "all",
@@ -125,7 +126,7 @@ $longArgs = @(
 )
 & $python @longArgs *>&1 | Tee-Object -FilePath $logPath -Append | Out-Null
 $longExit = $LASTEXITCODE
-Write-QueueLog "selected long queue exited code=$longExit out=$longOut"
+Write-QueueLog "selected 5k exploration queue exited code=$longExit out=$longOut"
 if ($longExit -ne 0) {
     exit $longExit
 }
@@ -151,15 +152,15 @@ if ($bestMainline.candidate -like "*d896*") {
     $dualCandidates += "dual_i3l5r2_d896e384_left320_q8q6q6_q4core_vocabmoe_qk525_lqer16t32"
 }
 $dualCsv = ($dualCandidates -join ",")
-$dualOut = Join-Path $Root "records\cap16-dual-canary-3000-auto-$stamp"
+$dualOut = Join-Path $Root "records\cap16-dual-canary-${DualIterations}-auto-$stamp"
 Write-QueueLog "starting dual canary queue out=$dualOut candidates=$dualCsv best_mainline=$($bestMainline.candidate) bpb=$($bestMainline.score)"
 $dualArgs = @(
     "scripts\run_16mb_vocab_moe_matrix.py",
     "--candidate-group", "cap16_dual_stream",
     "--candidates", $dualCsv,
     "--out", $dualOut,
-    "--iterations", "3000",
-    "--warmdown-iters", "3000",
+    "--iterations", "$DualIterations",
+    "--warmdown-iters", "$DualIterations",
     "--val-tokens", "131072",
     "--timeout", "9000",
     "--final-artifacts",

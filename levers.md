@@ -64,7 +64,7 @@ The short current read:
   of that spine.
 - New queue discipline:
   `scripts/queue_16mb_selective_overnight.ps1` waits for scouts, ranks rows by
-  exported BPB, reruns only the best few for longer, and gates dual-stream
+  exported BPB, reruns only the best few at 5k steps, and gates 5k dual-stream
   canaries behind a configurable mainline BPB threshold.
 - Next prepared matrix group:
   `sub4_leader_levers` in `scripts/run_sub4_iotail_quant_matrix.py`, covering
