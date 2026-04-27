@@ -1,15 +1,12 @@
 param(
-    [string] $Root = "C:\Users\corbe\Documents\golf\workspace\parameter-golf",
-    [string] $CurrentOutDir = "C:\Users\corbe\Documents\golf\workspace\parameter-golf\records\vocabmoe16-5k-auto-20260426-171524",
-    [int] $TargetRows = 7,
-    [int[]] $BroadQueuePids = @(31712, 31308, 5676, 38916)
+    [string] $Root = "C:\Users\corbe\Documents\golf\workspace\parameter-golf"
 )
 
 $ErrorActionPreference = "Stop"
 Set-Location -LiteralPath $Root
 
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$logPath = Join-Path $Root "records\urgent-pruned-after-current-row-$stamp.queue.log"
+$logPath = Join-Path $Root "records\pruned-now-simple-$stamp.queue.log"
 $python = Join-Path $Root ".venv-cuda313\Scripts\python.exe"
 
 function Write-QueueLog {
@@ -18,61 +15,10 @@ function Write-QueueLog {
     $line | Tee-Object -FilePath $logPath -Append | Out-Null
 }
 
-function Get-CsvRowCount {
-    param([string] $Path)
-    if (-not (Test-Path -LiteralPath $Path)) {
-        return 0
-    }
-    $rows = Import-Csv -LiteralPath $Path
-    if ($null -eq $rows) {
-        return 0
-    }
-    return @($rows).Count
-}
-
-function Stop-ProcessTree {
-    param([int] $ProcessId)
-    $proc = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
-    if ($null -eq $proc) {
-        return
-    }
-    $children = Get-CimInstance Win32_Process | Where-Object { $_.ParentProcessId -eq $ProcessId }
-    foreach ($child in $children) {
-        Stop-ProcessTree -ProcessId ([int] $child.ProcessId)
-    }
-    Write-QueueLog "stopping pid=$ProcessId name=$($proc.ProcessName)"
-    Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
-}
-
-function Invoke-Matrix {
-    param(
-        [string] $Label,
-        [string[]] $Args
-    )
-    Write-QueueLog "starting $Label"
-    & $python @Args *>&1 | Tee-Object -FilePath $logPath -Append | Out-Null
-    $exitCode = $LASTEXITCODE
-    Write-QueueLog "$Label exited code=$exitCode"
-    return $exitCode
-}
-
-$currentCsv = Join-Path $CurrentOutDir "train.csv"
-Write-QueueLog "urgent prune watcher started current_csv=$currentCsv target_rows=$TargetRows broad_pids=$($BroadQueuePids -join ',')"
-while ((Get-CsvRowCount -Path $currentCsv) -lt $TargetRows) {
-    $count = Get-CsvRowCount -Path $currentCsv
-    Write-QueueLog "waiting for active row to finish rows=$count/$TargetRows"
-    Start-Sleep -Seconds 30
-}
-Write-QueueLog "active row recorded rows=$(Get-CsvRowCount -Path $currentCsv); stopping broad queues"
-foreach ($queuePid in $BroadQueuePids) {
-    Stop-ProcessTree -ProcessId $queuePid
-}
-Start-Sleep -Seconds 5
-
-$councilOut = Join-Path $Root "records\vocabmoe16-council-rlm-urgent-5k-auto-$stamp"
-$sub4Out = Join-Path $Root "records\sub4-leader-urgent-5k-auto-$stamp"
-$spikeOut = Join-Path $Root "records\vocabmoe16-spike-urgent-5k-auto-$stamp"
-$widthOut = Join-Path $Root "records\sub4-width-urgent-5k-auto-$stamp"
+$councilOut = Join-Path $Root "records\vocabmoe16-council-rlm-pruned-5k-auto-$stamp"
+$sub4Out = Join-Path $Root "records\sub4-leader-pruned-5k-auto-$stamp"
+$spikeOut = Join-Path $Root "records\vocabmoe16-spike-pruned-5k-auto-$stamp"
+$widthOut = Join-Path $Root "records\sub4-width-pruned-5k-auto-$stamp"
 
 $councilCandidates = @(
     "i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_input_loopfirst_council_signperm_o0m2",
@@ -100,8 +46,8 @@ $widthCandidates = @(
     "i4l9r5_d640e256_q16q8q8t_wl320-480-560-640_attncore1_lqer_lidx_r8t16"
 ) -join ","
 
-$exitCodes = @()
-$exitCodes += Invoke-Matrix -Label "urgent council/RLM matrix out=$councilOut" -Args @(
+Write-QueueLog "starting pruned council/RLM matrix out=$councilOut"
+$councilArgs = @(
     "scripts\run_16mb_vocab_moe_matrix.py",
     "--candidate-group", "council_rlm",
     "--candidates", $councilCandidates,
@@ -115,7 +61,12 @@ $exitCodes += Invoke-Matrix -Label "urgent council/RLM matrix out=$councilOut" -
     "--idle-max-memory-mib", "2500",
     "--idle-seconds", "30"
 )
-$exitCodes += Invoke-Matrix -Label "urgent sub4 leader matrix out=$sub4Out" -Args @(
+& $python @councilArgs *>&1 | Tee-Object -FilePath $logPath -Append | Out-Null
+$councilExit = $LASTEXITCODE
+Write-QueueLog "pruned council/RLM matrix exited code=$councilExit out=$councilOut"
+
+Write-QueueLog "starting pruned sub4 leader matrix out=$sub4Out"
+$sub4Args = @(
     "scripts\run_sub4_iotail_quant_matrix.py",
     "--candidates", $sub4Candidates,
     "--out", $sub4Out,
@@ -132,7 +83,12 @@ $exitCodes += Invoke-Matrix -Label "urgent sub4 leader matrix out=$sub4Out" -Arg
     "--idle-max-memory-mib", "2500",
     "--idle-seconds", "30"
 )
-$exitCodes += Invoke-Matrix -Label "urgent spike matrix out=$spikeOut" -Args @(
+& $python @sub4Args *>&1 | Tee-Object -FilePath $logPath -Append | Out-Null
+$sub4Exit = $LASTEXITCODE
+Write-QueueLog "pruned sub4 leader matrix exited code=$sub4Exit out=$sub4Out"
+
+Write-QueueLog "starting pruned spike matrix out=$spikeOut"
+$spikeArgs = @(
     "scripts\run_16mb_vocab_moe_matrix.py",
     "--candidate-group", "vocabmoe_spike",
     "--candidates", $spikeCandidates,
@@ -146,7 +102,12 @@ $exitCodes += Invoke-Matrix -Label "urgent spike matrix out=$spikeOut" -Args @(
     "--idle-max-memory-mib", "2500",
     "--idle-seconds", "30"
 )
-$exitCodes += Invoke-Matrix -Label "urgent width matrix out=$widthOut" -Args @(
+& $python @spikeArgs *>&1 | Tee-Object -FilePath $logPath -Append | Out-Null
+$spikeExit = $LASTEXITCODE
+Write-QueueLog "pruned spike matrix exited code=$spikeExit out=$spikeOut"
+
+Write-QueueLog "starting pruned width matrix out=$widthOut"
+$widthArgs = @(
     "scripts\run_sub4_iotail_quant_matrix.py",
     "--candidates", $widthCandidates,
     "--out", $widthOut,
@@ -163,9 +124,13 @@ $exitCodes += Invoke-Matrix -Label "urgent width matrix out=$widthOut" -Args @(
     "--idle-max-memory-mib", "2500",
     "--idle-seconds", "30"
 )
+& $python @widthArgs *>&1 | Tee-Object -FilePath $logPath -Append | Out-Null
+$widthExit = $LASTEXITCODE
+Write-QueueLog "pruned width matrix exited code=$widthExit out=$widthOut"
 
-$firstFail = @($exitCodes | Where-Object { $_ -ne 0 } | Select-Object -First 1)
-if ($firstFail.Count -gt 0) {
-    exit ([int] $firstFail[0])
+foreach ($code in @($councilExit, $sub4Exit, $spikeExit, $widthExit)) {
+    if ($code -ne 0) {
+        exit $code
+    }
 }
 exit 0
