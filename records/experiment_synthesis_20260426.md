@@ -124,6 +124,11 @@ engineering interpretation.
   levers onto the HRC/VocabMoE spine at 5k steps: Polar/MIN_LR, QK 5.5, sparse
   attention gate, parallel residuals, moderate Huber Muon WD, BigramHash, and a
   local legal score-first TTT canary.
+- 2026-04-27 prior-work pass: the closest established relatives are Subformer
+  sandwich sharing, Universal-Transformer recurrence, ALBERT factorized
+  embeddings, mixed-precision QAT/GPTQ, and sparse MoE/memory layers. The queue
+  now also tests the main missing low-cost ideas: cycle-rev routes, loop-index
+  recurrence signals, and rank-4 per-depth Q/V LoRA.
 
 ## Tokenizer Lessons
 

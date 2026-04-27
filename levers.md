@@ -62,8 +62,9 @@ The short current read:
   taper variants, QK 5.25, stronger LQER, and VocabMoE input+loop-first.
   `cap16_leaderboard` ports the current public leaderboard levers onto that
   same HRC/VocabMoE spine at 5k steps: Polar/MIN_LR, QK 5.5, sparse attention
-  gate, parallel residuals, moderate Muon WD, BigramHash, and legal
-  score-first TTT.
+  gate, parallel residuals, cycle-rev routes, loop-index recurrence signals,
+  depth-LoRA relaxation, moderate Muon WD, BigramHash, and legal score-first
+  TTT.
   `cap16_dual_stream` adds an opt-in trained left/right advisor bridge on top
   of that spine.
 - New queue discipline:
@@ -446,6 +447,12 @@ Ingredients:
 - Sparse attention gate as a mutually exclusive replacement for the older
   attention-output gate.
 - Parallel residual mixer on the last three HRC tail layers.
+- Cycle-rev / recursive-palindrome route rows, because parameter-sharing prior
+  work suggests reverse cyclic reuse can outperform plain repeated cycling.
+- Loop-index recurrence signal, because Universal-Transformer style recurrence
+  usually benefits from knowing the current refinement step.
+- Tiny per-virtual-depth Q/V LoRA, because fully shared recurrent depth often
+  needs a cheap way to specialize by pass.
 - Moderate Huber Muon WD at `0.04`; this tests compressibility pressure without
   jumping straight to the public `0.09` region that has been unstable in local
   stacks.
@@ -460,8 +467,12 @@ Rows:
 - `leader_i3l3r3_d768e320_q6all_polar_minlr_vocabmoe_qk550_lqer16t32`
 - `leader_i3l3r3_d768e320_q6all_sparsegate_polar_minlr_vocabmoe_lqer16t32`
 - `leader_i3l3r3_d768e320_q6all_parres3_polar_minlr_vocabmoe_lqer16t32`
+- `leader_i3l3r2rev_d768e320_q6all_polar_minlr_vocabmoe_lqer16t32`
+- `leader_i3l3r3_d768e320_q6all_loopidx_polar_minlr_vocabmoe_lqer16t32`
+- `leader_i3l3r3_d768e320_q6all_depthlora4_polar_minlr_vocabmoe_lqer16t32`
 - `leader_i3l3r3_d768e320_q6all_wd04_polar_minlr_vocabmoe_lqer16t32`
 - `leader_i3l5r2_d768e320_q6all_polar_minlr_vocabmoe_qk525_lqer16t32`
+- `leader_i3l5r1rev_d768e320_q6all_polar_minlr_vocabmoe_qk525_lqer16t32`
 - `leader_i3l5r2_d768e320_q8q6q6_q4core_sparsegate_polar_minlr_vocabmoe_lqer16t32`
 - `leader_i3l3r3_d768e320_q6all_bigram_polar_minlr_vocabmoe_lqer16t32`
 - `leader_i3l3r3_d768e320_q6all_ttt_control24_vocabmoe_qk525_lqer16t32`
@@ -472,10 +483,34 @@ Decision:
   artifact roundtrip.
 - If QK 5.5 wins, make it the next cap-speed default.
 - If sparse gate wins, stop spending rows on the older attention-output gate.
+- If cycle-rev wins, switch the next HRC family from
+  `transition_recursive_cycle` to `transition_recursive_palindrome` at matched
+  virtual depth.
+- If loop-index or depth LoRA wins, treat recurrence identity as a first-class
+  byte spend before trying heavier dual-stream/council ideas.
 - If WD helps artifact size but hurts BPB, keep it as a final compression knob
   rather than a default training knob.
 - If the TTT canary helps meaningfully, the next implementation task is
   distributed-safe phased/LoRA TTT, not more council-style eval mixtures.
+
+## Prior-Work Improvement Pass
+
+Reference note: `records/prior_work_model_insights_20260427.md`.
+
+Most important takeaways:
+
+- Our mirrored IO-tail is closest to Subformer-style sandwich sharing plus
+  Universal-Transformer recurrence. That validates the direction, but also says
+  we should test reverse/cyclic schedules and recurrence step signals.
+- Our q-ladders are still hand-designed. HAWQ/GPTQ/LSQ-style work says the next
+  real quantization gain should come from sensitivity-aware bit assignment and
+  learned per-row/per-group quantizer scales.
+- Our VocabMoE is closer to a compact neural memory than a full giant MoE. MoE
+  prior work says hard expert routes must watch load balance; future spike rows
+  should log expert-load entropy and add a tiny balance loss if collapse appears.
+- If depth LoRA helps, it is a cheaper and cleaner first move than the heavier
+  dual-stream bridge, because it lets tied recurrent passes specialize with a
+  very small parameter spend.
 
 ## 16MB Dual-Stream Advisor
 

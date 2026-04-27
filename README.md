@@ -48,7 +48,7 @@ train-time quantization, and careful byte spending:
 | Loop-index recurrence | Whether the looped middle benefits from virtual-position information | Helps r9 and i5/l5, hurts q884 r3; do not enable blindly |
 | Sub-16MB transfer lane | Ports useful sub-4 speed and quality levers into a less byte-starved model | Local q6 proof baseline: `1.7567` final BPB, `9.27MB` artifact |
 | 16MB Vocab-MoE lane | Token-conditioned shared low-rank experts on top of the q6 HRC/CaseOps stack | Best completed dense row: `1.8710` BPB with input+loop-first hybrid Vocab-MoE; next scout spends cap on d768 width, richer LQER, QK 5.25, and fp16/fused-QKV speed levers |
-| 16MB leaderboard-blend lane | Ports current public-leaderboard tricks onto our HRC/VocabMoE spine | Queued 5k probes cover Polar/MIN_LR, QK 5.5, sparse attention gate, parallel residuals, moderate Muon WD, BigramHash, and legal score-first TTT |
+| 16MB leaderboard-blend lane | Ports current public-leaderboard and prior-work tricks onto our HRC/VocabMoE spine | Queued 5k probes cover Polar/MIN_LR, QK 5.5, sparse attention gate, parallel residuals, cycle-rev routing, loop-index signals, depth LoRA, moderate Muon WD, BigramHash, and legal score-first TTT |
 | 16MB spike/self-election Vocab-MoE | Hard top-k token/expert election variants of Vocab-MoE | Old queue aborted before training; corrected spike rows now use nonzero token-prior tie-breaks and are queued for final-export testing |
 | Tokenizer lane | Lossless CaseOps, word-boundary BPE/Unigram, vocab sweeps | Legal path is exact byte sidecars and reversible transforms, not lossy whole-word shortcuts |
 
@@ -80,6 +80,8 @@ priorities, not claim final scores.
 - `records/*.md` - human-written experiment ledgers and current conclusions.
 - `records/experiment_synthesis_20260426.md` - compact read of the current
   state across sub-4, sub-16, tokenizer, and systems work.
+- `records/prior_work_model_insights_20260427.md` - prior-work map for the
+  HRC/VocabMoE architecture and the concrete candidate changes it suggests.
 - `levers.md` - catalog of the quality, speed, size, tokenizer, systems, and
   legality levers explored so far.
 - `GRANT_SUMMARY.md` - short grant-application summary.

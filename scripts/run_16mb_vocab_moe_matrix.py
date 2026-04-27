@@ -124,6 +124,40 @@ def cap16_speed_base(
     }
 
 
+def palindrome_loop_route(io_width: int, loop_width: int, loop_repeats: int) -> dict[str, str]:
+    """Build entry-tail + cycle-rev recurrent middle + mirrored-exit route settings."""
+    core_depth = (2 * loop_width - 1) + max(loop_repeats - 1, 0) * (2 * loop_width - 2)
+    effective_depth = io_width + core_depth + io_width
+    return {
+        "NUM_UNIQUE_BLOCKS": str(io_width + loop_width),
+        "EFFECTIVE_DEPTH": str(effective_depth),
+        "HRC_RECURSIVE_CORE_START": str(io_width),
+        "HRC_ROUTE_REPEATS": str(loop_repeats),
+        "HRC_DEPTH_SCHEDULE_MODE": "transition_recursive_palindrome",
+        "HRC_ROUTE_PHASE_ENABLED": "0",
+    }
+
+
+def cap16_palindrome_base(
+    *,
+    model_dim: int = 768,
+    embed_dim: int = 320,
+    io_width: int = 3,
+    loop_width: int = 3,
+    repeats: int = 2,
+) -> dict[str, str]:
+    if model_dim % 64 != 0:
+        raise ValueError(f"model_dim must keep 64-wide heads, got {model_dim}")
+    return {
+        **BASE_16MB,
+        **CAP16_SPEED_COMMON,
+        **palindrome_loop_route(io_width, loop_width, repeats),
+        "MODEL_DIM": str(model_dim),
+        "NUM_HEADS": str(model_dim // 64),
+        "FACTORED_EMBED_DIM": str(embed_dim),
+    }
+
+
 def cap16_taper_env(
     *,
     io_width: int,
@@ -911,6 +945,41 @@ CAP16_LEADERBOARD_CANDIDATES: list[dict[str, Any]] = [
         "notes": "public parallel-residual analogue on the last three HRC tail layers",
     },
     {
+        "name": "leader_i3l3r2rev_d768e320_q6all_polar_minlr_vocabmoe_lqer16t32",
+        "env": {
+            **cap16_palindrome_base(model_dim=768, embed_dim=320, io_width=3, loop_width=3, repeats=2),
+            **cap16_lqer_env(16, 32),
+            **BEST_CLEAN_VOCABMOE,
+            **leaderboard_schedule_env(),
+        },
+        "notes": "cycle-rev route at the same virtual depth as i3/l3/r3 cycle; inspired by parameter-sharing studies",
+    },
+    {
+        "name": "leader_i3l3r3_d768e320_q6all_loopidx_polar_minlr_vocabmoe_lqer16t32",
+        "env": {
+            **cap16_speed_base(model_dim=768, embed_dim=320),
+            **cap16_lqer_env(16, 32),
+            **BEST_CLEAN_VOCABMOE,
+            **leaderboard_schedule_env(),
+            "HRC_LOOP_INDEX_ENABLED": "1",
+            "HRC_LOOP_INDEX_DIM": "64",
+            "HRC_LOOP_INDEX_SCALE_INIT": "0.02",
+        },
+        "notes": "adds Universal-Transformer-style recurrence step signal to the 16MB HRC/VocabMoE spine",
+    },
+    {
+        "name": "leader_i3l3r3_d768e320_q6all_depthlora4_polar_minlr_vocabmoe_lqer16t32",
+        "env": {
+            **cap16_speed_base(model_dim=768, embed_dim=320),
+            **cap16_lqer_env(16, 32),
+            **BEST_CLEAN_VOCABMOE,
+            **leaderboard_schedule_env(),
+            "DEPTH_LORA_RANK": "4",
+            "HRC_DEPTH_ADAPTER_TIE_MODE": "none",
+        },
+        "notes": "light per-virtual-depth Q/V LoRA relaxation so shared blocks can specialize by pass",
+    },
+    {
         "name": "leader_i3l3r3_d768e320_q6all_wd04_polar_minlr_vocabmoe_lqer16t32",
         "env": {
             **cap16_speed_base(model_dim=768, embed_dim=320),
@@ -931,6 +1000,16 @@ CAP16_LEADERBOARD_CANDIDATES: list[dict[str, Any]] = [
             **leaderboard_schedule_env(),
         },
         "notes": "leaderboard schedule on the more-unique-loop HRC row that local sub-4 sweeps favored",
+    },
+    {
+        "name": "leader_i3l5r1rev_d768e320_q6all_polar_minlr_vocabmoe_qk525_lqer16t32",
+        "env": {
+            **cap16_palindrome_base(model_dim=768, embed_dim=320, io_width=3, loop_width=5, repeats=1),
+            **cap16_lqer_env(16, 32),
+            **BEST_CLEAN_VOCABMOE,
+            **leaderboard_schedule_env(),
+        },
+        "notes": "cycle-rev unique-loop row with roughly the same virtual depth as i3/l5/r2 cycle",
     },
     {
         "name": "leader_i3l5r2_d768e320_q8q6q6_q4core_sparsegate_polar_minlr_vocabmoe_lqer16t32",
