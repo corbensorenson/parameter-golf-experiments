@@ -44,7 +44,7 @@ train-time quantization, and careful byte spending:
 | Precision-ladder IO tail | q16/q8/q4/q2/ternary entry and mirrored exit from the first training step | Legal and fast; best row `2.9888` BPB, so d512/e192 is under-capacity |
 | Loop-index recurrence | Whether the looped middle benefits from virtual-position information | Helps r9 and i5/l5, hurts q884 r3; do not enable blindly |
 | Sub-16MB transfer lane | Ports useful sub-4 speed and quality levers into a less byte-starved model | Local q6 proof baseline: `1.7567` final BPB, `9.27MB` artifact |
-| 16MB Vocab-MoE lane | Token-conditioned shared low-rank experts on top of the q6 HRC/CaseOps stack | Best completed dense row: `1.8710` BPB with input+loop-first hybrid Vocab-MoE |
+| 16MB Vocab-MoE lane | Token-conditioned shared low-rank experts on top of the q6 HRC/CaseOps stack | Best completed dense row: `1.8710` BPB with input+loop-first hybrid Vocab-MoE; next scout spends cap on d768 width, richer LQER, QK 5.25, and fp16/fused-QKV speed levers |
 | 16MB spike/self-election Vocab-MoE | Hard top-k token/expert election variants of Vocab-MoE | Old queue aborted before training; corrected spike rows now use nonzero token-prior tie-breaks and are queued for final-export testing |
 | Tokenizer lane | Lossless CaseOps, word-boundary BPE/Unigram, vocab sweeps | Legal path is exact byte sidecars and reversible transforms, not lossy whole-word shortcuts |
 
@@ -135,6 +135,12 @@ Run the 16MB Vocab-MoE matrix:
 
 ```bash
 python scripts/run_16mb_vocab_moe_matrix.py --wait-for-idle-gpu
+```
+
+Run the selective 16MB cap-speed scout after the active queue:
+
+```powershell
+.\scripts\queue_16mb_cap_speed_after_current.ps1 -WaitPid <queue_pid>
 ```
 
 Run the focused spike/self-election Vocab-MoE matrix only if the two corrected

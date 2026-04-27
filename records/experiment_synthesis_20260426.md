@@ -108,6 +108,12 @@ engineering interpretation.
   than sub-4, but the local 2060 runtime is not representative of 8xH100.
 - The next sub-16 cleanup is to resume the corrected frozen-carry/LQER ladder
   rather than trusting the suite that stopped after the baseline row.
+- 2026-04-27 update: VocabMoE is the strongest clean local 16MB lane. The best
+  completed row is `i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_input_loopfirst`
+  at `1.8710` final BPB, `832.11ms/step`, and `6,218,621` bytes. Council and
+  RLM-lite variants did not beat it after export. The next selective scout is
+  `cap16_speed`, which applies the sub-4 speed profile, QK 5.25, LQER r12/t24,
+  and d768 width/embedding/unique-loop spends under the official 16MB cap.
 
 ## Tokenizer Lessons
 

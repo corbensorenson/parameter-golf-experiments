@@ -17,6 +17,7 @@ from typing import Any
 from run_caseops_candidate_2060_compare import (
     DATASET_DIR,
     LOOP_EXACT_5K_Q6_PROOF_BASE,
+    SUB16_PORTED_FAST_LOOP,
     TOKENIZER_PATH,
     TRAINER,
     plain_loop_route,
@@ -79,6 +80,40 @@ BASE_16MB: dict[str, str] = {
     **PUBLIC_STACK_16MB,
     **plain_loop_route(3, 3, 3),
 }
+
+
+CAP16_SPEED_COMMON: dict[str, str] = {
+    **SUB16_PORTED_FAST_LOOP,
+    # Make the low-precision path truthful from the first forward pass while
+    # avoiding needless fp32 parameter casts on the heavy linear modules.
+    "TRAIN_CASTED_LINEAR_PARAM_DTYPE": "model",
+    "TRAIN_TERNARY_PARAM_DTYPE": "model",
+    "KEEP_CONTROL_PARAMS_FP32": "1",
+    "TRAIN_FUSED_QKV": "1",
+    "QK_GAIN_INIT": "5.25",
+    "LQER_RANK": "12",
+    "LQER_TOP_K": "24",
+}
+
+
+def cap16_speed_base(
+    *,
+    model_dim: int = 640,
+    embed_dim: int = 256,
+    io_width: int = 3,
+    loop_width: int = 3,
+    repeats: int = 3,
+) -> dict[str, str]:
+    if model_dim % 64 != 0:
+        raise ValueError(f"model_dim must keep 64-wide heads, got {model_dim}")
+    return {
+        **BASE_16MB,
+        **CAP16_SPEED_COMMON,
+        **plain_loop_route(io_width, loop_width, repeats),
+        "MODEL_DIM": str(model_dim),
+        "NUM_HEADS": str(model_dim // 64),
+        "FACTORED_EMBED_DIM": str(embed_dim),
+    }
 
 
 def vocab_moe_env(
@@ -628,12 +663,52 @@ COUNCIL_RLM_CANDIDATES: list[dict[str, Any]] = [
 ]
 
 
+CAP16_SPEED_CANDIDATES: list[dict[str, Any]] = [
+    {
+        "name": "i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_input_loopfirst_cap16fast_qk525_lqer12t24",
+        "env": {
+            **cap16_speed_base(model_dim=640, embed_dim=256),
+            **BEST_CLEAN_VOCABMOE,
+        },
+        "notes": (
+            "changed-code-path anchor: best dense VocabMoE placement plus fp16 "
+            "linear params, fp16 Muon, fused QKV, q6 forward from step zero, QK 5.25, and richer LQER"
+        ),
+    },
+    {
+        "name": "i3l3r3_d768e256_q6_vocabmoe_hybrid_k16r2_input_loopfirst_cap16fast_qk525_lqer12t24",
+        "env": {
+            **cap16_speed_base(model_dim=768, embed_dim=256),
+            **BEST_CLEAN_VOCABMOE,
+        },
+        "notes": "spend 16MB headroom on residual width while keeping the proven input+loop-first adapter",
+    },
+    {
+        "name": "i3l3r3_d768e320_q6_vocabmoe_hybrid_k16r2_input_loopfirst_cap16fast_qk525_lqer12t24",
+        "env": {
+            **cap16_speed_base(model_dim=768, embed_dim=320),
+            **BEST_CLEAN_VOCABMOE,
+        },
+        "notes": "same residual width as the d768 probe, but spends extra bytes on the factored tied embedding",
+    },
+    {
+        "name": "i3l5r2_d768e256_q6_vocabmoe_hybrid_k16r2_input_loopfirst_cap16fast_qk525_lqer12t24",
+        "env": {
+            **cap16_speed_base(model_dim=768, embed_dim=256, io_width=3, loop_width=5, repeats=2),
+            **BEST_CLEAN_VOCABMOE,
+        },
+        "notes": "tests the sub-4 lesson that more unique loop blocks can beat more repeats at similar virtual depth",
+    },
+]
+
+
 CANDIDATE_GROUPS: dict[str, list[dict[str, Any]]] = {
     "default": CANDIDATES,
     "vocabmoe": CANDIDATES,
     "vocabmoe_spike": SPIKE_CANDIDATES,
     "council_rlm": COUNCIL_RLM_CANDIDATES,
-    "all": CANDIDATES + SPIKE_CANDIDATES + COUNCIL_RLM_CANDIDATES,
+    "cap16_speed": CAP16_SPEED_CANDIDATES,
+    "all": CANDIDATES + SPIKE_CANDIDATES + COUNCIL_RLM_CANDIDATES + CAP16_SPEED_CANDIDATES,
 }
 
 

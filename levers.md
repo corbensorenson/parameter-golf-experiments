@@ -49,7 +49,14 @@ The short current read:
 - Current pruned sub4 follow-up is running under
   `records/sub4-leader-pruned-5k-auto-20260427-012503`. Early completed rows:
   QK 5.25 baseline exported at `2.4792` BPB and the attention-output-gate row
-  exported worse at `2.4997` BPB.
+  exported worse at `2.4997` BPB. The public-style stacked row went nonfinite
+  and was stopped; do not keep stacking public levers until each one has a
+  stable local anchor.
+- Next 16MB cap-speed scout:
+  `cap16_speed` in `scripts/run_16mb_vocab_moe_matrix.py`. It reruns the best
+  dense VocabMoE placement with sub-4 speed levers, QK 5.25, LQER r12/t24, and
+  selective d768 width/embedding/unique-loop spends under the official 16MB
+  cap.
 - Next prepared matrix group:
   `sub4_leader_levers` in `scripts/run_sub4_iotail_quant_matrix.py`, covering
   QK gain, scalar SmearGate, attention-output gates, sparse attention gates,
@@ -99,11 +106,14 @@ Rules:
 Current queue policy:
 
 - Keep the active pruned queue because its remaining rows are still high-signal:
-  the public-style sub4 stack, `i4l11r5` softer ladder, two corrected spike
-  probes, and two width-density probes.
+  `i4l11r5` softer ladder, two corrected spike probes, and two width-density
+  probes. The public-style sub4 stack was pruned after going nonfinite.
 - Cancelled the extra focused spike wait-queue that would have added seven more
   rows. It should only be relaunched if the two corrected spike probes beat or
   nearly match the dense VocabMoE anchor.
+- Queue the 16MB cap-speed scout after the active pruned queue, not in parallel,
+  because the d768 rows need clean GPU telemetry and should not compete with
+  local games or other CUDA work.
 
 ## 2026-04-26 Leaderboard-Inspired Addendum
 
@@ -315,6 +325,54 @@ Current read:
 - Dense loop-every3 and loop-all variants looked strong mid-run but crashed
   before final export. Treat those as unstable hints, not results.
 - Hidden-only routing exported worse (`1.9319`), so the token prior matters.
+
+## 16MB Cap-Speed Scout
+
+Goal: stop optimizing only around the 4MB research target and start spending
+the official 16MB cap on the strongest clean lane we have.
+
+Anchor:
+
+- Best completed dense VocabMoE:
+  `i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_input_loopfirst`,
+  `1.8710` BPB, `832.11ms/step`, `6,218,621` bytes.
+
+Applied levers:
+
+- `PARAM_DTYPE=fp16`, `TRAIN_CASTED_LINEAR_PARAM_DTYPE=model`, and
+  `MUON_DTYPE=fp16` so the heavy trainable linears are lower precision from the
+  start instead of only cast during matmul.
+- `USE_GRAD_SCALER=0`, `LOSS_FP32=0`, `POST_STEP_ZERO_GRAD=0`, and
+  `TRAIN_FUSED_QKV=1` from the sub-4 speed lane.
+- `TRAIN_QUANT_FORWARD=1`, `QUANT_WEIGHT_BITS=6`, and
+  `VOCAB_MOE_TRAIN_QUANT_BITS=6` so the q6 path is trained rather than only
+  exported.
+- `QK_GAIN_INIT=5.25`, because the local sub4 follow-up improved from
+  `2.4983` to `2.4792` BPB with that change.
+- `LQER_RANK=12`, `LQER_TOP_K=24`, because 16MB has enough room to buy more
+  quantization-error repair than the sub-4 rows.
+
+Candidate group:
+
+- runner group: `--candidate-group cap16_speed` in
+  `scripts/run_16mb_vocab_moe_matrix.py`.
+- queue script: `scripts/queue_16mb_cap_speed_after_current.ps1`.
+
+Rows:
+
+- `i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_input_loopfirst_cap16fast_qk525_lqer12t24`
+- `i3l3r3_d768e256_q6_vocabmoe_hybrid_k16r2_input_loopfirst_cap16fast_qk525_lqer12t24`
+- `i3l3r3_d768e320_q6_vocabmoe_hybrid_k16r2_input_loopfirst_cap16fast_qk525_lqer12t24`
+- `i3l5r2_d768e256_q6_vocabmoe_hybrid_k16r2_input_loopfirst_cap16fast_qk525_lqer12t24`
+
+Decision:
+
+- If the d640 fast anchor beats or closely matches the old d640 anchor while
+  stepping faster, promote the speed profile for all 16MB work.
+- If d768/e256 wins, spend the cap on residual width first.
+- If d768/e320 wins over d768/e256, embeddings are still the bottleneck.
+- If i3/l5/r2 wins, unique loop diversity is more valuable than more recurrence
+  at this cap.
 
 ## 16MB Spiking / Self-Election Vocab-MoE
 
