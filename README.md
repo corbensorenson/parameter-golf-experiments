@@ -137,7 +137,8 @@ Run the 16MB Vocab-MoE matrix:
 python scripts/run_16mb_vocab_moe_matrix.py --wait-for-idle-gpu
 ```
 
-Run the focused spike/self-election Vocab-MoE matrix after the active queue:
+Run the focused spike/self-election Vocab-MoE matrix only if the two corrected
+spike probes in the active pruned queue look promising:
 
 ```powershell
 .\scripts\queue_vocabmoe_spike_focused_after_current.ps1

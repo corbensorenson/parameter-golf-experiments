@@ -74,6 +74,37 @@ Each lever has:
 Use the current promoted rows as anchors. A lever is only promoted if it wins
 under final artifact round-trip, not only train-time loss.
 
+## GPU Time Selection Policy
+
+Goal: spend local 2060 time only on rows that can change the next decision.
+
+Rules:
+
+- Every matrix needs a named anchor and a decision it can change. If a row
+  cannot beat, disprove, or calibrate against that anchor, it should not run.
+- Prefer small, high-information batches: one anchor if the code path changed,
+  two or three lever probes, then stop and read the final export rows.
+- Do not rerun controls whose code path and training profile have not changed.
+  Reuse the existing final-export row instead.
+- Treat final artifact round-trip as the score. Mid-run BPB only decides whether
+  to continue or prune a lane.
+- Freeze weak lanes until a new mechanism addresses their failure mode. Current
+  examples: council/RLM-lite is frozen until the export gap is fixed; broad
+  spike sweeps are frozen until the two corrected spike probes show promise.
+- Use staged budgets for speculative ideas: first 1-2 corrected probes, then a
+  focused follow-up only if they come close to the anchor.
+- Stop broad "because it exists" matrices. Candidate count should stay small
+  enough that every row has a sentence-level reason to exist.
+
+Current queue policy:
+
+- Keep the active pruned queue because its remaining rows are still high-signal:
+  the public-style sub4 stack, `i4l11r5` softer ladder, two corrected spike
+  probes, and two width-density probes.
+- Cancelled the extra focused spike wait-queue that would have added seven more
+  rows. It should only be relaunched if the two corrected spike probes beat or
+  nearly match the dense VocabMoE anchor.
+
 ## 2026-04-26 Leaderboard-Inspired Addendum
 
 Goal: fold current public competition ideas into our HRC/IO-tail search without
@@ -377,9 +408,9 @@ Current read:
   `spikestatic_k16r2_input_top2` and
   `spikehybrid_k16r2_input_loopfirst_top2`.
 - A focused post-current queue is prepared in
-  `scripts/queue_vocabmoe_spike_focused_after_current.ps1`. It reruns the
-  spike idea with a dense best-anchor row plus top-1/top-2 static and hybrid
-  self-election rows, all with final artifact round-trip enabled.
+  `scripts/queue_vocabmoe_spike_focused_after_current.ps1`, but it is not
+  currently scheduled. Run it only if the two corrected spike probes in the
+  active pruned queue beat or nearly match the dense VocabMoE anchor.
 
 ## 16MB Council, Dynamic Depth, And RLM-Lite
 
