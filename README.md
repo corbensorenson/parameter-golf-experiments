@@ -44,7 +44,8 @@ train-time quantization, and careful byte spending:
 | Precision-ladder IO tail | q16/q8/q4/q2/ternary entry and mirrored exit from the first training step | Legal and fast; best row `2.9888` BPB, so d512/e192 is under-capacity |
 | Loop-index recurrence | Whether the looped middle benefits from virtual-position information | Helps r9 and i5/l5, hurts q884 r3; do not enable blindly |
 | Sub-16MB transfer lane | Ports useful sub-4 speed and quality levers into a less byte-starved model | Local q6 proof baseline: `1.7567` final BPB, `9.27MB` artifact |
-| 16MB Vocab-MoE lane | Token-conditioned shared low-rank experts on top of the q6 HRC/CaseOps stack | Implemented; first 5k matrix queued after the active sub-4 run |
+| 16MB Vocab-MoE lane | Token-conditioned shared low-rank experts on top of the q6 HRC/CaseOps stack | Best completed dense row: `1.8710` BPB with input+loop-first hybrid Vocab-MoE |
+| 16MB spike/self-election Vocab-MoE | Hard top-k token/expert election variants of Vocab-MoE | Old queue aborted before training; corrected spike rows now use nonzero token-prior tie-breaks and are queued for final-export testing |
 | Tokenizer lane | Lossless CaseOps, word-boundary BPE/Unigram, vocab sweeps | Legal path is exact byte sidecars and reversible transforms, not lossy whole-word shortcuts |
 
 These are local proxy numbers, not official leaderboard submissions. The
@@ -136,6 +137,12 @@ Run the 16MB Vocab-MoE matrix:
 python scripts/run_16mb_vocab_moe_matrix.py --wait-for-idle-gpu
 ```
 
+Run the focused spike/self-election Vocab-MoE matrix after the active queue:
+
+```powershell
+.\scripts\queue_vocabmoe_spike_focused_after_current.ps1
+```
+
 Probe packed ternary linear speed:
 
 ```bash
@@ -158,6 +165,11 @@ python scripts/bench_packed_ternary_linear.py
   selected virtual HRC layers.
 - `VOCAB_MOE_TRAIN_QUANT_BITS=6` - trains the Vocab-MoE adapter against a q6
   forward view from the first step.
+- `VOCAB_MOE_MODE=spike_static|spike_hybrid|spike_hidden` and
+  `VOCAB_MOE_SPIKE_TOP_K=1|2` - hard top-k self-election variants.
+- `VOCAB_MOE_PRIOR_INIT_STD=0.01` - used by spike rows as a tiny per-token
+  tie-breaker so hard routing does not start with every token selecting the
+  same expert.
 - `QUANT_FORCE_PATTERNS=vocab_moe.token_prior.weight,vocab_moe.down,vocab_moe.up`
   keeps Vocab-MoE train/export precision aligned for truthful matrix scores.
 - `TRAIN_FUSED_QKV=1`, `USE_GRAD_SCALER=0`, `MUON_DTYPE=fp16` - speed probes

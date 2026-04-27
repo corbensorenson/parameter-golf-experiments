@@ -1,6 +1,6 @@
 # Project Levers
 
-Date: 2026-04-26
+Date: 2026-04-27
 
 This is the working lever catalog for the Parameter Golf experiments in this
 repo. It is meant to answer: "What knobs can we pull, what do they buy us, what
@@ -8,6 +8,19 @@ do they cost, and what have we already learned?"
 
 The short current read:
 
+- Best completed 16MB VocabMoE row:
+  `i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_input_loopfirst`, final export
+  `1.8710` BPB, `832.11ms/step`, `6,218,621` bytes. The winning placement is
+  "input plus first recurrent-loop block", not loop-only or hidden-only.
+- Council/RLM-lite revival on that VocabMoE anchor did not beat the dense
+  anchor after export. The best completed council/RLM row is hard-gated council
+  at `1.8846` BPB; dynamic council, RLM-lite, and RLM+council all exported
+  worse.
+- Spiking/self-election VocabMoE has not yet produced a valid matrix result.
+  The first spike queue only wrote a plan and exited at the old idle threshold.
+  The spike candidate definitions now use a small token-prior tie-breaker
+  (`VOCAB_MOE_PRIOR_INIT_STD=0.01`) so hard top-k does not send every token to
+  the same expert bucket at step zero.
 - Best fixed-step clean sub-4MB local row:
   `i5l5r9_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12`, final export
   `2.5608` BPB, `188.33ms/step`, `3,882,787` bytes.
@@ -33,6 +46,10 @@ The short current read:
   `2.4884` BPB, `267.67ms/step`, `6,050,853` bytes. This made "one full
   attention block at the recurrent-core entry" the current best soft-size
   quality lever.
+- Current pruned sub4 follow-up is running under
+  `records/sub4-leader-pruned-5k-auto-20260427-012503`. Early completed rows:
+  QK 5.25 baseline exported at `2.4792` BPB and the attention-output-gate row
+  exported worse at `2.4997` BPB.
 - Next prepared matrix group:
   `sub4_leader_levers` in `scripts/run_sub4_iotail_quant_matrix.py`, covering
   QK gain, scalar SmearGate, attention-output gates, sparse attention gates,
@@ -195,6 +212,7 @@ Knobs:
 - `VOCAB_MOE_RANK`, usually `1` or `2` locally
 - `VOCAB_MOE_MODE=static|hybrid|hidden`
 - `VOCAB_MOE_LAYERS=input|loop_first|loop_every3|...`
+- `VOCAB_MOE_PRIOR_INIT_STD`, usually `0.0` for dense routing
 - `VOCAB_MOE_TRAIN_QUANT_BITS=6`
 - `VOCAB_MOE_SITE_BIAS_ENABLED=1`
 - `VOCAB_MOE_SITE_SCALE_ENABLED=1`
@@ -253,15 +271,19 @@ Current read:
   train-quant-forward on the 2060; rows reached about `1.83-1.96` BPB by
   `1k-1.5k` steps and then diverged to `nan`. That run is not a valid quality
   comparison.
-- The corrected queued run cools the train-quant-forward stack:
+- The corrected 5k run cooled the train-quant-forward stack:
   `TIED_EMBED_LR=0.002`, `MATRIX_LR=0.0016`, `SCALAR_LR=0.0016`,
   `WARMUP_STEPS=20`, no frozen carry, no Muon WD, and
   `TRAIN_ABORT_ON_NONFINITE=1`.
-- The control row is included so we can attribute wins to VocabMoE rather than
-  the cooled q6 HRC scaffold.
-- If `loop_first` wins, the idea is likely acting as a token-conditioned repair
-  for the recurrent middle. If `input` wins, it is closer to a learned
-  vocabulary-feature embedding.
+- Valid completed rows from `records/vocabmoe16-5k-auto-20260426-171524`:
+  control `1.9377`, static input `1.9201`, hybrid loop-first `1.9098`, and
+  hybrid input+loop-first `1.8710` final export BPB.
+- The win is therefore not just the cooled q6 scaffold. Token-conditioned
+  shared low-rank experts helped, and the best placement is both before the
+  stack and at the first repeated block.
+- Dense loop-every3 and loop-all variants looked strong mid-run but crashed
+  before final export. Treat those as unstable hints, not results.
+- Hidden-only routing exported worse (`1.9319`), so the token prior matters.
 
 ## 16MB Spiking / Self-Election Vocab-MoE
 
@@ -283,6 +305,9 @@ Knobs:
 - `VOCAB_MOE_SPIKE_TOP_K`, usually `1` or `2`
 - `VOCAB_MOE_SPIKE_STE=1`
 - `VOCAB_MOE_SPIKE_NORMALIZE=1`
+- `VOCAB_MOE_PRIOR_INIT_STD=0.01` for spike rows, used as a tiny
+  reproducible tie-breaker so hard top-k starts with token-specific expert
+  elections instead of a single global tied expert.
 - same expert count/rank/layer-site knobs as the dense VocabMoE family.
 - runner group: `--candidate-group vocabmoe_spike` in
   `scripts/run_16mb_vocab_moe_matrix.py`.
@@ -338,9 +363,23 @@ Queued local probes:
 
 Current read:
 
-- Implemented and smoke-tested as a new optional path.
-- It is queued after the existing 16MB VocabMoE, sub4 leader-levers, and
-  width-ladder queues so it does not interrupt the current experiments.
+- Implemented as a new optional path, but not yet validly scored.
+- The first full spike queue
+  `records/vocabmoe16-spike-5k-auto-20260426-195631` did not actually train:
+  it wrote `candidate_plan.md`, waited on the old `25%` idle-GPU threshold, and
+  exited with code `-1`.
+- The original zero-prior spike design was also a poor test: hard top-k with
+  all-zero token priors can tie every token into the same expert bucket at step
+  zero. The candidate definitions now use `VOCAB_MOE_PRIOR_INIT_STD=0.01` for
+  spike rows to make self-election real from the first forward pass.
+- The active pruned queue includes two corrected spike probes after the sub4
+  leader rows:
+  `spikestatic_k16r2_input_top2` and
+  `spikehybrid_k16r2_input_loopfirst_top2`.
+- A focused post-current queue is prepared in
+  `scripts/queue_vocabmoe_spike_focused_after_current.ps1`. It reruns the
+  spike idea with a dense best-anchor row plus top-1/top-2 static and hybrid
+  self-election rows, all with final artifact round-trip enabled.
 
 ## 16MB Council, Dynamic Depth, And RLM-Lite
 
@@ -420,9 +459,15 @@ Current read:
   unaffected unless their env explicitly enables these knobs.
 - The strongest completed VocabMoE anchor is
   `i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_input_loopfirst` at final export
-  `1.8710` BPB, so the council/RLM matrix is pinned to that row first.
+  `1.8710` BPB, so the council/RLM matrix was pinned to that row first.
 - The `base_mirror_hybrid` candidate uses offsets `0,0,-1`, because the
   implementation correctly requires one depth offset per peer.
+- Completed pruned results did not beat the dense anchor: hard-gated council
+  `1.8846`, dynamic council `1.9551`, RLM-lite input memory `1.9363`, and
+  RLM-lite plus signperm council `2.0098` final export BPB.
+- Current conclusion: council and RLM-lite are implemented and legal enough for
+  local probes, but they are not promoted. They add complexity and/or eval
+  compute without beating the dense VocabMoE anchor yet.
 
 ## Measurement And Legality Levers
 

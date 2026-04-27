@@ -88,6 +88,7 @@ def vocab_moe_env(
     mode: str,
     layers: str,
     scale: float = 0.05,
+    prior_init_std: float = 0.0,
     up_init: float = 0.001,
     temperature: float = 1.0,
     activation: str = "relu2",
@@ -105,7 +106,7 @@ def vocab_moe_env(
         "VOCAB_MOE_MODE": mode,
         "VOCAB_MOE_LAYERS": layers,
         "VOCAB_MOE_SCALE_INIT": f"{scale:g}",
-        "VOCAB_MOE_PRIOR_INIT_STD": "0.0",
+        "VOCAB_MOE_PRIOR_INIT_STD": f"{prior_init_std:g}",
         "VOCAB_MOE_DOWN_INIT_STD": "0.02",
         "VOCAB_MOE_UP_INIT_STD": f"{up_init:g}",
         "VOCAB_MOE_TEMPERATURE": f"{temperature:g}",
@@ -119,6 +120,13 @@ def vocab_moe_env(
         "VOCAB_MOE_SPIKE_NORMALIZE": "1" if spike_normalize else "0",
         "QUANT_FORCE_PATTERNS": "vocab_moe.token_prior.weight,vocab_moe.down,vocab_moe.up",
     }
+
+
+def spike_vocab_moe_env(**kwargs: Any) -> dict[str, str]:
+    # Hard top-k routing needs a tiny deterministic tie-breaker; otherwise
+    # zero token priors make every token initially elect the same expert bucket.
+    kwargs.setdefault("prior_init_std", 0.01)
+    return vocab_moe_env(**kwargs)
 
 
 BEST_CLEAN_VOCABMOE = vocab_moe_env(
@@ -370,10 +378,18 @@ SPIKE_CANDIDATES: list[dict[str, Any]] = [
         "notes": "dense static VocabMoE anchor from the current family",
     },
     {
+        "name": "i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_input_loopfirst_dense_anchor",
+        "env": {
+            **BASE_16MB,
+            **BEST_CLEAN_VOCABMOE,
+        },
+        "notes": "best dense VocabMoE anchor for fair sparse/self-election comparison",
+    },
+    {
         "name": "i3l3r3_d640e256_q6_vocabmoe_spikestatic_k16r2_input_top1",
         "env": {
             **BASE_16MB,
-            **vocab_moe_env(experts=16, rank=2, mode="spike_static", layers="input", spike_top_k=1),
+            **spike_vocab_moe_env(experts=16, rank=2, mode="spike_static", layers="input", spike_top_k=1),
         },
         "notes": "pure token self-election: each token fires one expert",
     },
@@ -381,7 +397,7 @@ SPIKE_CANDIDATES: list[dict[str, Any]] = [
         "name": "i3l3r3_d640e256_q6_vocabmoe_spikestatic_k16r2_input_top2",
         "env": {
             **BASE_16MB,
-            **vocab_moe_env(experts=16, rank=2, mode="spike_static", layers="input", spike_top_k=2),
+            **spike_vocab_moe_env(experts=16, rank=2, mode="spike_static", layers="input", spike_top_k=2),
         },
         "notes": "token self-election with two active experts",
     },
@@ -389,7 +405,7 @@ SPIKE_CANDIDATES: list[dict[str, Any]] = [
         "name": "i3l3r3_d640e256_q6_vocabmoe_spikestatic_k32r1_input_top2",
         "env": {
             **BASE_16MB,
-            **vocab_moe_env(experts=32, rank=1, mode="spike_static", layers="input", spike_top_k=2),
+            **spike_vocab_moe_env(experts=32, rank=1, mode="spike_static", layers="input", spike_top_k=2),
         },
         "notes": "more token clusters at similar rank cost",
     },
@@ -397,7 +413,7 @@ SPIKE_CANDIDATES: list[dict[str, Any]] = [
         "name": "i3l3r3_d640e256_q6_vocabmoe_spikehybrid_k16r2_loopfirst_top1",
         "env": {
             **BASE_16MB,
-            **vocab_moe_env(experts=16, rank=2, mode="spike_hybrid", layers="loop_first", spike_top_k=1),
+            **spike_vocab_moe_env(experts=16, rank=2, mode="spike_hybrid", layers="loop_first", spike_top_k=1),
         },
         "notes": "hidden-state router nudges token self-election at loop entry",
     },
@@ -405,7 +421,7 @@ SPIKE_CANDIDATES: list[dict[str, Any]] = [
         "name": "i3l3r3_d640e256_q6_vocabmoe_spikehybrid_k16r2_loopfirst_top2",
         "env": {
             **BASE_16MB,
-            **vocab_moe_env(experts=16, rank=2, mode="spike_hybrid", layers="loop_first", spike_top_k=2),
+            **spike_vocab_moe_env(experts=16, rank=2, mode="spike_hybrid", layers="loop_first", spike_top_k=2),
         },
         "notes": "hybrid self-election with two loop-entry experts",
     },
@@ -413,7 +429,7 @@ SPIKE_CANDIDATES: list[dict[str, Any]] = [
         "name": "i3l3r3_d640e256_q6_vocabmoe_spikehybrid_k16r2_input_loopfirst_top2",
         "env": {
             **BASE_16MB,
-            **vocab_moe_env(
+            **spike_vocab_moe_env(
                 experts=16,
                 rank=2,
                 mode="spike_hybrid",
@@ -427,7 +443,7 @@ SPIKE_CANDIDATES: list[dict[str, Any]] = [
         "name": "i3l3r3_d640e256_q6_vocabmoe_spikehybrid_k16r2_loopevery3_top2",
         "env": {
             **BASE_16MB,
-            **vocab_moe_env(experts=16, rank=2, mode="spike_hybrid", layers="loop_every3", spike_top_k=2),
+            **spike_vocab_moe_env(experts=16, rank=2, mode="spike_hybrid", layers="loop_every3", spike_top_k=2),
         },
         "notes": "sparse token repair through the recurrent middle",
     },
@@ -435,7 +451,7 @@ SPIKE_CANDIDATES: list[dict[str, Any]] = [
         "name": "i3l3r3_d640e256_q6_vocabmoe_spikehybrid_k16r2_loopall_top2",
         "env": {
             **BASE_16MB,
-            **vocab_moe_env(experts=16, rank=2, mode="spike_hybrid", layers="loop", spike_top_k=2),
+            **spike_vocab_moe_env(experts=16, rank=2, mode="spike_hybrid", layers="loop", spike_top_k=2),
         },
         "notes": "max sparse recurrent repair; slower but high-signal",
     },
@@ -443,7 +459,7 @@ SPIKE_CANDIDATES: list[dict[str, Any]] = [
         "name": "i3l3r3_d640e256_q6_vocabmoe_spikehidden_k16r2_loopfirst_top2",
         "env": {
             **BASE_16MB,
-            **vocab_moe_env(experts=16, rank=2, mode="spike_hidden", layers="loop_first", spike_top_k=2),
+            **spike_vocab_moe_env(experts=16, rank=2, mode="spike_hidden", layers="loop_first", spike_top_k=2),
         },
         "notes": "router-only sparse control, no token prior",
     },
@@ -451,7 +467,7 @@ SPIKE_CANDIDATES: list[dict[str, Any]] = [
         "name": "i3l3r3_d640e256_q6_vocabmoe_spikehybrid_k32r1_loopfirst_top2",
         "env": {
             **BASE_16MB,
-            **vocab_moe_env(experts=32, rank=1, mode="spike_hybrid", layers="loop_first", spike_top_k=2),
+            **spike_vocab_moe_env(experts=32, rank=1, mode="spike_hybrid", layers="loop_first", spike_top_k=2),
         },
         "notes": "more expert buckets with cheap rank-1 bases",
     },
@@ -459,7 +475,7 @@ SPIKE_CANDIDATES: list[dict[str, Any]] = [
         "name": "i3l3r3_d640e256_q6_vocabmoe_spikehybrid_k16r4_loopfirst_top2",
         "env": {
             **BASE_16MB,
-            **vocab_moe_env(experts=16, rank=4, mode="spike_hybrid", layers="loop_first", spike_top_k=2),
+            **spike_vocab_moe_env(experts=16, rank=4, mode="spike_hybrid", layers="loop_first", spike_top_k=2),
         },
         "notes": "more rank behind the sparse gate",
     },
@@ -467,7 +483,7 @@ SPIKE_CANDIDATES: list[dict[str, Any]] = [
         "name": "i3l3r3_d640e256_q6_vocabmoe_spikehybrid_k16r2_loopfirst_top2_nonorm",
         "env": {
             **BASE_16MB,
-            **vocab_moe_env(
+            **spike_vocab_moe_env(
                 experts=16,
                 rank=2,
                 mode="spike_hybrid",
@@ -654,6 +670,7 @@ def write_candidate_plan(out_dir: Path, candidates: list[dict[str, Any]], iterat
                 f"k={env['VOCAB_MOE_EXPERTS']} r={env['VOCAB_MOE_RANK']} "
                 f"mode={env['VOCAB_MOE_MODE']} layers={env['VOCAB_MOE_LAYERS']} "
                 f"temp={env['VOCAB_MOE_TEMPERATURE']} "
+                f"prior_std={env.get('VOCAB_MOE_PRIOR_INIT_STD', '0')} "
                 f"site={env['VOCAB_MOE_SITE_BIAS_ENABLED']}/{env['VOCAB_MOE_SITE_SCALE_ENABLED']} "
                 f"train_q={env['VOCAB_MOE_TRAIN_QUANT_BITS']} "
                 f"spike_k={env.get('VOCAB_MOE_SPIKE_TOP_K', '0')} "
