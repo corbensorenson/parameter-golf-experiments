@@ -111,6 +111,9 @@ class Hyperparameters:
     vocab_moe_site_bias_enabled = bool(int(os.environ.get("VOCAB_MOE_SITE_BIAS_ENABLED", "1")))
     vocab_moe_site_scale_enabled = bool(int(os.environ.get("VOCAB_MOE_SITE_SCALE_ENABLED", "1")))
     vocab_moe_site_scale_init = float(os.environ.get("VOCAB_MOE_SITE_SCALE_INIT", "1.0"))
+    vocab_moe_spike_top_k = int(os.environ.get("VOCAB_MOE_SPIKE_TOP_K", "0"))
+    vocab_moe_spike_ste = bool(int(os.environ.get("VOCAB_MOE_SPIKE_STE", "1")))
+    vocab_moe_spike_normalize = bool(int(os.environ.get("VOCAB_MOE_SPIKE_NORMALIZE", "1")))
     depth_lora_rank = int(os.environ.get("DEPTH_LORA_RANK", "0"))
     hrc_mirror_mode = os.environ.get("HRC_MIRROR_MODE", "signperm").strip().lower()
     hrc_depth_schedule_mode = os.environ.get("HRC_DEPTH_SCHEDULE_MODE", "cycle").strip().lower()
@@ -1078,9 +1081,10 @@ if Hyperparameters.vocab_moe_experts <= 0:
     raise ValueError(f"VOCAB_MOE_EXPERTS must be >= 1, got {Hyperparameters.vocab_moe_experts}")
 if Hyperparameters.vocab_moe_rank <= 0:
     raise ValueError(f"VOCAB_MOE_RANK must be >= 1, got {Hyperparameters.vocab_moe_rank}")
-if Hyperparameters.vocab_moe_mode not in {"static", "hybrid", "hidden"}:
+_VOCAB_MOE_MODES = {"static", "hybrid", "hidden", "spike_static", "spike_hybrid", "spike_hidden"}
+if Hyperparameters.vocab_moe_mode not in _VOCAB_MOE_MODES:
     raise ValueError(
-        "VOCAB_MOE_MODE must be one of static|hybrid|hidden, "
+        "VOCAB_MOE_MODE must be one of static|hybrid|hidden|spike_static|spike_hybrid|spike_hidden, "
         f"got {Hyperparameters.vocab_moe_mode!r}"
     )
 if Hyperparameters.vocab_moe_temperature <= 0.0:
@@ -1095,6 +1099,8 @@ if Hyperparameters.vocab_moe_train_quant_bits not in {0, *SUPPORTED_LINEAR_QUANT
         "VOCAB_MOE_TRAIN_QUANT_BITS must be 0 or one of "
         f"{sorted(SUPPORTED_LINEAR_QUANT_BITS)}, got {Hyperparameters.vocab_moe_train_quant_bits}"
     )
+if Hyperparameters.vocab_moe_spike_top_k < 0:
+    raise ValueError(f"VOCAB_MOE_SPIKE_TOP_K must be >= 0, got {Hyperparameters.vocab_moe_spike_top_k}")
 if INT8_KEEP_FLOAT_MAX_NUMEL < 0:
     raise ValueError(f"INT8_KEEP_FLOAT_MAX_NUMEL must be >= 0, got {INT8_KEEP_FLOAT_MAX_NUMEL}")
 if Hyperparameters.quant_ternary_group_size <= 0:
@@ -2931,6 +2937,9 @@ class VocabMoELite(nn.Module):
         temperature: float = 1.0,
         activation: str = "relu2",
         train_quant_bits: int = 0,
+        spike_top_k: int = 0,
+        spike_ste: bool = True,
+        spike_normalize: bool = True,
     ):
         super().__init__()
         self.vocab_size = int(vocab_size)
@@ -2938,16 +2947,21 @@ class VocabMoELite(nn.Module):
         self.num_experts = int(num_experts)
         self.rank = int(rank)
         self.mode = str(mode).strip().lower()
+        self.base_mode = self.mode[6:] if self.mode.startswith("spike_") else self.mode
         self.temperature = float(temperature)
         self.activation = str(activation).strip().lower()
         self.train_quant_bits = int(train_quant_bits)
+        self.spike_top_k = int(spike_top_k)
+        self.spike_ste = bool(spike_ste)
+        self.spike_normalize = bool(spike_normalize)
+        self.spike_enabled = self.mode.startswith("spike_") or self.spike_top_k > 0
         self.token_prior = nn.Embedding(self.vocab_size, self.num_experts)
         if float(prior_init_std) > 0.0:
             nn.init.normal_(self.token_prior.weight, mean=0.0, std=float(prior_init_std))
         else:
             nn.init.zeros_(self.token_prior.weight)
         self.router = None
-        if self.mode in {"hybrid", "hidden"}:
+        if self.base_mode in {"hybrid", "hidden"}:
             self.router = CastedLinear(self.dim, self.num_experts, bias=False)
             self.router._zero_init = True
         # Store bases as 2D matrices so train-time STE and export quantization
@@ -2977,6 +2991,26 @@ class VocabMoELite(nn.Module):
             return F.gelu(h)
         return h
 
+    def _routing_weights(self, logits: Tensor, out_dtype: torch.dtype) -> Tensor:
+        logits = logits / self.temperature
+        soft = torch.softmax(logits, dim=-1)
+        if not self.spike_enabled:
+            return soft.to(dtype=out_dtype)
+        top_k = self.spike_top_k
+        if top_k <= 0:
+            top_k = 1
+        top_k = min(int(top_k), self.num_experts)
+        if top_k >= self.num_experts:
+            return soft.to(dtype=out_dtype)
+        chosen = torch.topk(logits, k=top_k, dim=-1).indices
+        mask = torch.zeros_like(soft, dtype=torch.bool).scatter_(-1, chosen, True)
+        hard = soft.masked_fill(~mask, 0.0)
+        if self.spike_normalize:
+            hard = hard / hard.sum(dim=-1, keepdim=True).clamp_min(1e-6)
+        if self.spike_ste:
+            hard = hard + (soft - soft.detach())
+        return hard.to(dtype=out_dtype)
+
     def forward(
         self,
         x: Tensor,
@@ -2986,7 +3020,7 @@ class VocabMoELite(nn.Module):
     ) -> Tensor:
         work_dtype = x.dtype if x.dtype in {torch.float16, torch.bfloat16} else torch.float32
         x_norm = F.rms_norm(x, (x.size(-1),))
-        if self.mode == "hidden":
+        if self.base_mode == "hidden":
             logits = x.new_zeros((*token_ids.shape, self.num_experts), dtype=torch.float32)
         else:
             prior_weight = self._maybe_quant_2d(self.token_prior.weight, torch.float32)
@@ -2995,7 +3029,7 @@ class VocabMoELite(nn.Module):
             logits = logits + self.router(x_norm).float()
         if site_bias is not None:
             logits = logits + site_bias.float()[None, None, :]
-        weights = torch.softmax(logits / self.temperature, dim=-1).to(dtype=x.dtype)
+        weights = self._routing_weights(logits, x.dtype)
         down = self._maybe_quant_2d(self.down, work_dtype).view(self.num_experts, self.rank, self.dim)
         up = self._maybe_quant_2d(self.up, work_dtype).view(self.num_experts, self.dim, self.rank)
         down = down.to(dtype=x.dtype)
@@ -3768,6 +3802,9 @@ class GPT(nn.Module):
         vocab_moe_site_bias_enabled: bool = True,
         vocab_moe_site_scale_enabled: bool = True,
         vocab_moe_site_scale_init: float = 1.0,
+        vocab_moe_spike_top_k: int = 0,
+        vocab_moe_spike_ste: bool = True,
+        vocab_moe_spike_normalize: bool = True,
         smear_gate_enabled: bool = False,
         smear_gate_width: int = 12,
         smear_gate_mode: str = "vector",
@@ -3890,6 +3927,9 @@ class GPT(nn.Module):
                 temperature=vocab_moe_temperature,
                 activation=vocab_moe_activation,
                 train_quant_bits=vocab_moe_train_quant_bits,
+                spike_top_k=vocab_moe_spike_top_k,
+                spike_ste=vocab_moe_spike_ste,
+                spike_normalize=vocab_moe_spike_normalize,
             )
             if vocab_moe_enabled
             else None
@@ -5294,6 +5334,9 @@ def main() -> None:
         vocab_moe_site_bias_enabled=args.vocab_moe_site_bias_enabled,
         vocab_moe_site_scale_enabled=args.vocab_moe_site_scale_enabled,
         vocab_moe_site_scale_init=args.vocab_moe_site_scale_init,
+        vocab_moe_spike_top_k=args.vocab_moe_spike_top_k,
+        vocab_moe_spike_ste=args.vocab_moe_spike_ste,
+        vocab_moe_spike_normalize=args.vocab_moe_spike_normalize,
         smear_gate_enabled=args.smear_gate_enabled,
         smear_gate_width=args.smear_gate_width,
         smear_gate_mode=args.smear_gate_mode,
@@ -5577,7 +5620,10 @@ def main() -> None:
         f"site_scale_init:{args.vocab_moe_site_scale_init:g} "
         f"temperature:{args.vocab_moe_temperature:g} "
         f"activation:{args.vocab_moe_activation} "
-        f"train_quant_bits:{args.vocab_moe_train_quant_bits}"
+        f"train_quant_bits:{args.vocab_moe_train_quant_bits} "
+        f"spike_top_k:{args.vocab_moe_spike_top_k} "
+        f"spike_ste:{int(args.vocab_moe_spike_ste)} "
+        f"spike_normalize:{int(args.vocab_moe_spike_normalize)}"
     )
     log0(
         f"basis_xsa_enabled:{args.basis_xsa_enabled} basis_rank:{args.basis_rank} "

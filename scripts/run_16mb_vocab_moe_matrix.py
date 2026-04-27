@@ -94,6 +94,9 @@ def vocab_moe_env(
     site_bias: bool = True,
     site_scale: bool = True,
     train_quant_bits: int = 6,
+    spike_top_k: int = 0,
+    spike_ste: bool = True,
+    spike_normalize: bool = True,
 ) -> dict[str, str]:
     return {
         "VOCAB_MOE_ENABLED": "1",
@@ -111,6 +114,9 @@ def vocab_moe_env(
         "VOCAB_MOE_SITE_BIAS_ENABLED": "1" if site_bias else "0",
         "VOCAB_MOE_SITE_SCALE_ENABLED": "1" if site_scale else "0",
         "VOCAB_MOE_SITE_SCALE_INIT": "1.0",
+        "VOCAB_MOE_SPIKE_TOP_K": str(spike_top_k),
+        "VOCAB_MOE_SPIKE_STE": "1" if spike_ste else "0",
+        "VOCAB_MOE_SPIKE_NORMALIZE": "1" if spike_normalize else "0",
         "QUANT_FORCE_PATTERNS": "vocab_moe.token_prior.weight,vocab_moe.down,vocab_moe.up",
     }
 
@@ -292,11 +298,148 @@ CANDIDATES: list[dict[str, Any]] = [
 ]
 
 
-def selected_candidates(raw: str) -> list[dict[str, Any]]:
+SPIKE_CANDIDATES: list[dict[str, Any]] = [
+    {
+        "name": "i3l3r3_d640e256_q6_stable_control",
+        "env": dict(BASE_16MB),
+        "notes": "same cooled q6 route/stack, no vocab MoE; anchor for sparse routing",
+    },
+    {
+        "name": "i3l3r3_d640e256_q6_vocabmoe_static_k16r2_input_dense_anchor",
+        "env": {
+            **BASE_16MB,
+            **vocab_moe_env(experts=16, rank=2, mode="static", layers="input"),
+        },
+        "notes": "dense static VocabMoE anchor from the current family",
+    },
+    {
+        "name": "i3l3r3_d640e256_q6_vocabmoe_spikestatic_k16r2_input_top1",
+        "env": {
+            **BASE_16MB,
+            **vocab_moe_env(experts=16, rank=2, mode="spike_static", layers="input", spike_top_k=1),
+        },
+        "notes": "pure token self-election: each token fires one expert",
+    },
+    {
+        "name": "i3l3r3_d640e256_q6_vocabmoe_spikestatic_k16r2_input_top2",
+        "env": {
+            **BASE_16MB,
+            **vocab_moe_env(experts=16, rank=2, mode="spike_static", layers="input", spike_top_k=2),
+        },
+        "notes": "token self-election with two active experts",
+    },
+    {
+        "name": "i3l3r3_d640e256_q6_vocabmoe_spikestatic_k32r1_input_top2",
+        "env": {
+            **BASE_16MB,
+            **vocab_moe_env(experts=32, rank=1, mode="spike_static", layers="input", spike_top_k=2),
+        },
+        "notes": "more token clusters at similar rank cost",
+    },
+    {
+        "name": "i3l3r3_d640e256_q6_vocabmoe_spikehybrid_k16r2_loopfirst_top1",
+        "env": {
+            **BASE_16MB,
+            **vocab_moe_env(experts=16, rank=2, mode="spike_hybrid", layers="loop_first", spike_top_k=1),
+        },
+        "notes": "hidden-state router nudges token self-election at loop entry",
+    },
+    {
+        "name": "i3l3r3_d640e256_q6_vocabmoe_spikehybrid_k16r2_loopfirst_top2",
+        "env": {
+            **BASE_16MB,
+            **vocab_moe_env(experts=16, rank=2, mode="spike_hybrid", layers="loop_first", spike_top_k=2),
+        },
+        "notes": "hybrid self-election with two loop-entry experts",
+    },
+    {
+        "name": "i3l3r3_d640e256_q6_vocabmoe_spikehybrid_k16r2_input_loopfirst_top2",
+        "env": {
+            **BASE_16MB,
+            **vocab_moe_env(
+                experts=16,
+                rank=2,
+                mode="spike_hybrid",
+                layers="input,loop_first",
+                spike_top_k=2,
+            ),
+        },
+        "notes": "self-election before the stack and at the first repeated block",
+    },
+    {
+        "name": "i3l3r3_d640e256_q6_vocabmoe_spikehybrid_k16r2_loopevery3_top2",
+        "env": {
+            **BASE_16MB,
+            **vocab_moe_env(experts=16, rank=2, mode="spike_hybrid", layers="loop_every3", spike_top_k=2),
+        },
+        "notes": "sparse token repair through the recurrent middle",
+    },
+    {
+        "name": "i3l3r3_d640e256_q6_vocabmoe_spikehybrid_k16r2_loopall_top2",
+        "env": {
+            **BASE_16MB,
+            **vocab_moe_env(experts=16, rank=2, mode="spike_hybrid", layers="loop", spike_top_k=2),
+        },
+        "notes": "max sparse recurrent repair; slower but high-signal",
+    },
+    {
+        "name": "i3l3r3_d640e256_q6_vocabmoe_spikehidden_k16r2_loopfirst_top2",
+        "env": {
+            **BASE_16MB,
+            **vocab_moe_env(experts=16, rank=2, mode="spike_hidden", layers="loop_first", spike_top_k=2),
+        },
+        "notes": "router-only sparse control, no token prior",
+    },
+    {
+        "name": "i3l3r3_d640e256_q6_vocabmoe_spikehybrid_k32r1_loopfirst_top2",
+        "env": {
+            **BASE_16MB,
+            **vocab_moe_env(experts=32, rank=1, mode="spike_hybrid", layers="loop_first", spike_top_k=2),
+        },
+        "notes": "more expert buckets with cheap rank-1 bases",
+    },
+    {
+        "name": "i3l3r3_d640e256_q6_vocabmoe_spikehybrid_k16r4_loopfirst_top2",
+        "env": {
+            **BASE_16MB,
+            **vocab_moe_env(experts=16, rank=4, mode="spike_hybrid", layers="loop_first", spike_top_k=2),
+        },
+        "notes": "more rank behind the sparse gate",
+    },
+    {
+        "name": "i3l3r3_d640e256_q6_vocabmoe_spikehybrid_k16r2_loopfirst_top2_nonorm",
+        "env": {
+            **BASE_16MB,
+            **vocab_moe_env(
+                experts=16,
+                rank=2,
+                mode="spike_hybrid",
+                layers="loop_first",
+                spike_top_k=2,
+                spike_normalize=False,
+            ),
+        },
+        "notes": "damped sparse gate: selected experts keep original softmax mass",
+    },
+]
+
+
+CANDIDATE_GROUPS: dict[str, list[dict[str, Any]]] = {
+    "default": CANDIDATES,
+    "vocabmoe": CANDIDATES,
+    "vocabmoe_spike": SPIKE_CANDIDATES,
+    "all": CANDIDATES + SPIKE_CANDIDATES,
+}
+
+
+def selected_candidates(raw: str, group: str = "default") -> list[dict[str, Any]]:
+    if group not in CANDIDATE_GROUPS:
+        raise ValueError(f"unknown candidate group {group!r}; choices: {', '.join(sorted(CANDIDATE_GROUPS))}")
+    pool = CANDIDATE_GROUPS[group]
     if not raw.strip():
-        return CANDIDATES
+        return pool
     wanted = {item.strip() for item in raw.split(",") if item.strip()}
-    out = [candidate for candidate in CANDIDATES if candidate["name"] in wanted]
+    out = [candidate for candidate in pool if candidate["name"] in wanted]
     missing = wanted - {candidate["name"] for candidate in out}
     if missing:
         raise ValueError(f"unknown candidate(s): {', '.join(sorted(missing))}")
@@ -323,7 +466,10 @@ def write_candidate_plan(out_dir: Path, candidates: list[dict[str, Any]], iterat
                 f"mode={env['VOCAB_MOE_MODE']} layers={env['VOCAB_MOE_LAYERS']} "
                 f"temp={env['VOCAB_MOE_TEMPERATURE']} "
                 f"site={env['VOCAB_MOE_SITE_BIAS_ENABLED']}/{env['VOCAB_MOE_SITE_SCALE_ENABLED']} "
-                f"train_q={env['VOCAB_MOE_TRAIN_QUANT_BITS']}"
+                f"train_q={env['VOCAB_MOE_TRAIN_QUANT_BITS']} "
+                f"spike_k={env.get('VOCAB_MOE_SPIKE_TOP_K', '0')} "
+                f"ste={env.get('VOCAB_MOE_SPIKE_STE', '1')} "
+                f"norm={env.get('VOCAB_MOE_SPIKE_NORMALIZE', '1')}"
             )
         route = (
             f"unique={env['NUM_UNIQUE_BLOCKS']} depth={env['EFFECTIVE_DEPTH']} "
@@ -452,6 +598,7 @@ def main() -> int:
     parser.add_argument("--val-tokens", type=int, default=131072)
     parser.add_argument("--timeout", type=int, default=9000)
     parser.add_argument("--wallclock-seconds", type=int, default=0)
+    parser.add_argument("--candidate-group", default="default", choices=sorted(CANDIDATE_GROUPS))
     parser.add_argument("--candidates", default="")
     parser.add_argument("--final-artifacts", action="store_true", default=True)
     parser.add_argument("--skip-final-artifacts", action="store_true")
@@ -465,7 +612,7 @@ def main() -> int:
     parser.add_argument("--list", action="store_true")
     args = parser.parse_args()
 
-    candidates = selected_candidates(args.candidates)
+    candidates = selected_candidates(args.candidates, args.candidate_group)
     if args.list:
         for candidate in candidates:
             print(candidate["name"])

@@ -263,6 +263,85 @@ Current read:
   for the recurrent middle. If `input` wins, it is closer to a learned
   vocabulary-feature embedding.
 
+## 16MB Spiking / Self-Election Vocab-MoE
+
+Goal: test the user's "each token expert elects itself" idea without launching
+one literal Python/CUDA thread or one literal micro-network per vocabulary item.
+
+References:
+
+- Switch Transformer top-1 sparse routing:
+  <https://arxiv.org/abs/2101.03961>
+- Expert Choice routing:
+  <https://arxiv.org/abs/2202.09368>
+- Product-key memory as a large sparse token-conditioned memory:
+  <https://arxiv.org/abs/1907.05242>
+
+Knobs:
+
+- `VOCAB_MOE_MODE=spike_static|spike_hybrid|spike_hidden`
+- `VOCAB_MOE_SPIKE_TOP_K`, usually `1` or `2`
+- `VOCAB_MOE_SPIKE_STE=1`
+- `VOCAB_MOE_SPIKE_NORMALIZE=1`
+- same expert count/rank/layer-site knobs as the dense VocabMoE family.
+- runner group: `--candidate-group vocabmoe_spike` in
+  `scripts/run_16mb_vocab_moe_matrix.py`.
+
+Design:
+
+- `spike_static` is the pure self-election version: token id -> expert prior ->
+  hard top-k expert mask.
+- `spike_hybrid` adds the hidden-state router to the token prior before the hard
+  mask, so the token gets a vote and the current context gets a vote.
+- `spike_hidden` is a router-only sparse control.
+- The forward pass uses hard top-k expert selection, but keeps a straight-through
+  gradient through the original softmax when `VOCAB_MOE_SPIKE_STE=1`.
+- The selected experts are renormalized by default. A non-normalized candidate
+  keeps only the selected softmax mass, which makes the adapter damped and may
+  be more stable.
+
+Why it might help:
+
+- Dense VocabMoE mixes every expert for every token, which is expressive but
+  may blur specialization.
+- Hard top-k gates can force token/expert clusters to specialize, closer to the
+  "spiking" intuition.
+- Top-1/top-2 gates reduce multiply work after a future sparse/fused
+  implementation. The first implementation is correctness-first and still
+  computes the shared expert bank densely, so the near-term signal is quality,
+  stability, and export behavior rather than speed.
+
+Cost/risk:
+
+- Hard routing can starve experts, especially with zero-initialized token
+  priors. The STE path is meant to reduce that risk.
+- On the current dense batched implementation, top-k does not yet save FLOPs
+  because the expert basis matmuls are still dense. A custom gather/fused path is
+  a later systems lever if the scores justify it.
+- Router logits should stay small and stable; this remains train-quant-forward
+  q6 from the start for the VocabMoE tensors.
+
+Queued local probes:
+
+- `i3l3r3_d640e256_q6_vocabmoe_spikestatic_k16r2_input_top1`
+- `i3l3r3_d640e256_q6_vocabmoe_spikestatic_k16r2_input_top2`
+- `i3l3r3_d640e256_q6_vocabmoe_spikestatic_k32r1_input_top2`
+- `i3l3r3_d640e256_q6_vocabmoe_spikehybrid_k16r2_loopfirst_top1`
+- `i3l3r3_d640e256_q6_vocabmoe_spikehybrid_k16r2_loopfirst_top2`
+- `i3l3r3_d640e256_q6_vocabmoe_spikehybrid_k16r2_input_loopfirst_top2`
+- `i3l3r3_d640e256_q6_vocabmoe_spikehybrid_k16r2_loopevery3_top2`
+- `i3l3r3_d640e256_q6_vocabmoe_spikehybrid_k16r2_loopall_top2`
+- `i3l3r3_d640e256_q6_vocabmoe_spikehidden_k16r2_loopfirst_top2`
+- `i3l3r3_d640e256_q6_vocabmoe_spikehybrid_k32r1_loopfirst_top2`
+- `i3l3r3_d640e256_q6_vocabmoe_spikehybrid_k16r4_loopfirst_top2`
+- `i3l3r3_d640e256_q6_vocabmoe_spikehybrid_k16r2_loopfirst_top2_nonorm`
+
+Current read:
+
+- Implemented and smoke-tested as a new optional path.
+- It is queued after the existing 16MB VocabMoE, sub4 leader-levers, and
+  width-ladder queues so it does not interrupt the current experiments.
+
 ## Measurement And Legality Levers
 
 ### Final Artifact Round-Trip
