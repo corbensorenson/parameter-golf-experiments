@@ -62,6 +62,10 @@ The short current read:
   taper variants, QK 5.25, stronger LQER, and VocabMoE input+loop-first.
   `cap16_dual_stream` adds an opt-in trained left/right advisor bridge on top
   of that spine.
+- New queue discipline:
+  `scripts/queue_16mb_selective_overnight.ps1` waits for scouts, ranks rows by
+  exported BPB, reruns only the best few for longer, and gates dual-stream
+  canaries behind a configurable mainline BPB threshold.
 - Next prepared matrix group:
   `sub4_leader_levers` in `scripts/run_sub4_iotail_quant_matrix.py`, covering
   QK gain, scalar SmearGate, attention-output gates, sparse attention gates,
