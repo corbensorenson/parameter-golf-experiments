@@ -160,6 +160,56 @@ def cap16_lqer_env(rank: int, top_k: int) -> dict[str, str]:
     }
 
 
+def leaderboard_schedule_env(*, min_lr: float = 0.026, ns_variant: str = "polar_express") -> dict[str, str]:
+    return {
+        "LR_MIN_SCALE": f"{min_lr:g}",
+        "MUON_NS_VARIANT": ns_variant,
+        "MUON_BACKEND_STEPS": "5",
+    }
+
+
+def sparse_gate_env(*, width: int = 24, scale: float = 1.0, init_std: float = 0.0) -> dict[str, str]:
+    return {
+        "ATTN_OUT_GATE_ENABLED": "0",
+        "SPARSE_ATTN_GATE_ENABLED": "1",
+        "ATTN_OUT_GATE_WIDTH": str(width),
+        "SPARSE_ATTN_GATE_INIT_STD": f"{init_std:g}",
+        "SPARSE_ATTN_GATE_SCALE": f"{scale:g}",
+    }
+
+
+def parallel_residual_env(*, last_n: int = 3) -> dict[str, str]:
+    return {
+        "PARALLEL_RESIDUAL_LAST_N": str(last_n),
+        "RESIDUAL_MIXER_ENABLED": "1",
+    }
+
+
+def legal_ttt_env(*, lr: float = 0.005, updates: int = 24) -> dict[str, str]:
+    return {
+        "TTT_SCORE_FIRST_ENABLED": "1",
+        "TTT_SCORE_FIRST_PARAM_MODE": "control",
+        "TTT_SCORE_FIRST_OPTIMIZER": "sgd",
+        "TTT_SCORE_FIRST_LR": f"{lr:g}",
+        "TTT_SCORE_FIRST_WEIGHT_DECAY": "0.0",
+        "TTT_SCORE_FIRST_GRAD_CLIP": "1.0",
+        "TTT_SCORE_FIRST_MAX_UPDATES": str(updates),
+    }
+
+
+def bigram_hash_env(*, vocab_size: int = 10240, dim: int = 32) -> dict[str, str]:
+    return {
+        "BIGRAM_VOCAB_SIZE": str(vocab_size),
+        "BIGRAM_DIM": str(dim),
+        "BIGRAM_INIT_STD": "0.02",
+        "BIGRAM_SCALE_INIT": "0.05",
+        "LQER_EXCLUDE_PATTERNS": (
+            "tok_emb.weight,lm_head.weight,token_smear,attn_gate_w,attn_out_gate,"
+            "vocab_moe,dual_stream,bigram"
+        ),
+    }
+
+
 def dual_stream_env(
     *,
     left_dim: int,
@@ -816,6 +866,108 @@ CAP16_MAINLINE_CANDIDATES: list[dict[str, Any]] = [
 ]
 
 
+CAP16_LEADERBOARD_CANDIDATES: list[dict[str, Any]] = [
+    {
+        "name": "leader_i3l3r3_d768e320_q6all_polar_minlr_vocabmoe_qk525_lqer16t32",
+        "env": {
+            **cap16_speed_base(model_dim=768, embed_dim=320),
+            **cap16_lqer_env(16, 32),
+            **BEST_CLEAN_VOCABMOE,
+            **leaderboard_schedule_env(),
+        },
+        "notes": "leaderboard-blend anchor: HRC/VocabMoE spine plus Polar Express Muon and a small MIN_LR floor",
+    },
+    {
+        "name": "leader_i3l3r3_d768e320_q6all_polar_minlr_vocabmoe_qk550_lqer16t32",
+        "env": {
+            **cap16_speed_base(model_dim=768, embed_dim=320),
+            **cap16_lqer_env(16, 32),
+            **BEST_CLEAN_VOCABMOE,
+            **leaderboard_schedule_env(),
+            "QK_GAIN_INIT": "5.5",
+        },
+        "notes": "tests whether the public QK-gain push past 5.25 transfers to the HRC/VocabMoE spine",
+    },
+    {
+        "name": "leader_i3l3r3_d768e320_q6all_sparsegate_polar_minlr_vocabmoe_lqer16t32",
+        "env": {
+            **cap16_speed_base(model_dim=768, embed_dim=320),
+            **cap16_lqer_env(16, 32),
+            **BEST_CLEAN_VOCABMOE,
+            **leaderboard_schedule_env(),
+            **sparse_gate_env(width=24),
+        },
+        "notes": "replaces the attention-output gate with the public sparse attention gate on the same spine",
+    },
+    {
+        "name": "leader_i3l3r3_d768e320_q6all_parres3_polar_minlr_vocabmoe_lqer16t32",
+        "env": {
+            **cap16_speed_base(model_dim=768, embed_dim=320),
+            **cap16_lqer_env(16, 32),
+            **BEST_CLEAN_VOCABMOE,
+            **leaderboard_schedule_env(),
+            **parallel_residual_env(last_n=3),
+        },
+        "notes": "public parallel-residual analogue on the last three HRC tail layers",
+    },
+    {
+        "name": "leader_i3l3r3_d768e320_q6all_wd04_polar_minlr_vocabmoe_lqer16t32",
+        "env": {
+            **cap16_speed_base(model_dim=768, embed_dim=320),
+            **cap16_lqer_env(16, 32),
+            **BEST_CLEAN_VOCABMOE,
+            **leaderboard_schedule_env(),
+            "MUON_WEIGHT_DECAY": "0.04",
+            "MUON_WEIGHT_DECAY_MODE": "huber",
+        },
+        "notes": "moderate compressibility-aware Muon WD; lower than the public 0.09-ish frontier for local stability",
+    },
+    {
+        "name": "leader_i3l5r2_d768e320_q6all_polar_minlr_vocabmoe_qk525_lqer16t32",
+        "env": {
+            **cap16_speed_base(model_dim=768, embed_dim=320, io_width=3, loop_width=5, repeats=2),
+            **cap16_lqer_env(16, 32),
+            **BEST_CLEAN_VOCABMOE,
+            **leaderboard_schedule_env(),
+        },
+        "notes": "leaderboard schedule on the more-unique-loop HRC row that local sub-4 sweeps favored",
+    },
+    {
+        "name": "leader_i3l5r2_d768e320_q8q6q6_q4core_sparsegate_polar_minlr_vocabmoe_lqer16t32",
+        "env": {
+            **cap16_speed_base(model_dim=768, embed_dim=320, io_width=3, loop_width=5, repeats=2),
+            **cap16_taper_env(io_width=3, loop_width=5, io_bits=(8, 6, 6), core_bits=4),
+            **cap16_lqer_env(16, 32),
+            **BEST_CLEAN_VOCABMOE,
+            **leaderboard_schedule_env(),
+            **sparse_gate_env(width=24),
+        },
+        "notes": "strong combined row: precision taper, sparse attention gate, Polar/MIN_LR, and VocabMoE",
+    },
+    {
+        "name": "leader_i3l3r3_d768e320_q6all_bigram_polar_minlr_vocabmoe_lqer16t32",
+        "env": {
+            **cap16_speed_base(model_dim=768, embed_dim=320),
+            **cap16_lqer_env(16, 32),
+            **BEST_CLEAN_VOCABMOE,
+            **leaderboard_schedule_env(),
+            **bigram_hash_env(vocab_size=10240, dim=32),
+        },
+        "notes": "tests the older but repeatedly useful BigramHash side channel alongside VocabMoE",
+    },
+    {
+        "name": "leader_i3l3r3_d768e320_q6all_ttt_control24_vocabmoe_qk525_lqer16t32",
+        "env": {
+            **cap16_speed_base(model_dim=768, embed_dim=320),
+            **cap16_lqer_env(16, 32),
+            **BEST_CLEAN_VOCABMOE,
+            **legal_ttt_env(lr=0.005, updates=24),
+        },
+        "notes": "local legal score-first TTT canary; compare final_quant_ttt_val_bpb against final_export_val_bpb",
+    },
+]
+
+
 CAP16_DUAL_STREAM_CANDIDATES: list[dict[str, Any]] = [
     {
         "name": "dual_i3l3r3_d768e320_left256_q6all_vocabmoe_qk525_lqer12t24",
@@ -866,6 +1018,7 @@ CANDIDATE_GROUPS: dict[str, list[dict[str, Any]]] = {
     "council_rlm": COUNCIL_RLM_CANDIDATES,
     "cap16_speed": CAP16_SPEED_CANDIDATES,
     "cap16_mainline": CAP16_MAINLINE_CANDIDATES,
+    "cap16_leaderboard": CAP16_LEADERBOARD_CANDIDATES,
     "cap16_dual_stream": CAP16_DUAL_STREAM_CANDIDATES,
     "all": (
         CANDIDATES
@@ -873,6 +1026,7 @@ CANDIDATE_GROUPS: dict[str, list[dict[str, Any]]] = {
         + COUNCIL_RLM_CANDIDATES
         + CAP16_SPEED_CANDIDATES
         + CAP16_MAINLINE_CANDIDATES
+        + CAP16_LEADERBOARD_CANDIDATES
         + CAP16_DUAL_STREAM_CANDIDATES
     ),
 }

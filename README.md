@@ -48,6 +48,7 @@ train-time quantization, and careful byte spending:
 | Loop-index recurrence | Whether the looped middle benefits from virtual-position information | Helps r9 and i5/l5, hurts q884 r3; do not enable blindly |
 | Sub-16MB transfer lane | Ports useful sub-4 speed and quality levers into a less byte-starved model | Local q6 proof baseline: `1.7567` final BPB, `9.27MB` artifact |
 | 16MB Vocab-MoE lane | Token-conditioned shared low-rank experts on top of the q6 HRC/CaseOps stack | Best completed dense row: `1.8710` BPB with input+loop-first hybrid Vocab-MoE; next scout spends cap on d768 width, richer LQER, QK 5.25, and fp16/fused-QKV speed levers |
+| 16MB leaderboard-blend lane | Ports current public-leaderboard tricks onto our HRC/VocabMoE spine | Queued 5k probes cover Polar/MIN_LR, QK 5.5, sparse attention gate, parallel residuals, moderate Muon WD, BigramHash, and legal score-first TTT |
 | 16MB spike/self-election Vocab-MoE | Hard top-k token/expert election variants of Vocab-MoE | Old queue aborted before training; corrected spike rows now use nonzero token-prior tie-breaks and are queued for final-export testing |
 | Tokenizer lane | Lossless CaseOps, word-boundary BPE/Unigram, vocab sweeps | Legal path is exact byte sidecars and reversible transforms, not lossy whole-word shortcuts |
 
@@ -151,6 +152,7 @@ List the two next 16MB candidate families:
 
 ```bash
 python scripts/run_16mb_vocab_moe_matrix.py --candidate-group cap16_mainline --list
+python scripts/run_16mb_vocab_moe_matrix.py --candidate-group cap16_leaderboard --list
 python scripts/run_16mb_vocab_moe_matrix.py --candidate-group cap16_dual_stream --list
 ```
 
@@ -164,9 +166,10 @@ worth spending GPU time on:
 ```
 
 For unattended queue fill, queue the selective 5k exploration tail after the
-mainline scout. It reads the finished cap-speed/mainline CSVs, reruns only the
-best export-roundtrip candidates at 5k steps, and runs dual-stream canaries only
-if a mainline scout clears the configured BPB threshold:
+mainline scout. It first runs the leaderboard-blend HRC/VocabMoE rows at 5k
+steps, then reads the finished cap-speed/mainline CSVs, reruns only the best
+export-roundtrip candidates at 5k steps, and runs dual-stream canaries only if
+a mainline scout clears the configured BPB threshold:
 
 ```powershell
 .\scripts\queue_16mb_selective_overnight.ps1 -WaitPid <mainline_queue_pid>
@@ -213,6 +216,9 @@ python scripts/bench_packed_ternary_linear.py
 - `DUAL_STREAM_ENABLED=1` plus `DUAL_STREAM_LEFT_DIM`, `DUAL_STREAM_RANK`, and
   `DUAL_STREAM_SITES=input,loop_first,pre_output` - trained left/right advisor
   bridge for 16MB candidates.
+- `LR_MIN_SCALE=0.026`, `MUON_NS_VARIANT=polar_express`,
+  `SPARSE_ATTN_GATE_ENABLED=1`, `PARALLEL_RESIDUAL_LAST_N`, and
+  `TTT_SCORE_FIRST_ENABLED=1` - leaderboard-inspired 16MB probe levers.
 
 ## What Is Not Included
 

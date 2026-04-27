@@ -60,11 +60,16 @@ The short current read:
 - New 16MB setup groups:
   `cap16_mainline` spends the cap on d768/d896 width, e384 embeddings, q6/q4
   taper variants, QK 5.25, stronger LQER, and VocabMoE input+loop-first.
+  `cap16_leaderboard` ports the current public leaderboard levers onto that
+  same HRC/VocabMoE spine at 5k steps: Polar/MIN_LR, QK 5.5, sparse attention
+  gate, parallel residuals, moderate Muon WD, BigramHash, and legal
+  score-first TTT.
   `cap16_dual_stream` adds an opt-in trained left/right advisor bridge on top
   of that spine.
 - New queue discipline:
   `scripts/queue_16mb_selective_overnight.ps1` waits for scouts, ranks rows by
-  exported BPB, reruns only the best few at 5k steps, and gates 5k dual-stream
+  exported BPB, runs the leaderboard-inspired HRC/VocabMoE blend rows at 5k,
+  reruns only the best few scout rows at 5k steps, and gates 5k dual-stream
   canaries behind a configurable mainline BPB threshold.
 - Next prepared matrix group:
   `sub4_leader_levers` in `scripts/run_sub4_iotail_quant_matrix.py`, covering
@@ -421,6 +426,56 @@ Decision:
   the 16MB family.
 - If d896 is unstable or too slow locally, keep d768 as the local iteration
   default and reserve d896 for H100s.
+
+## 16MB Leaderboard-Blend HRC/VocabMoE
+
+Goal: take the strongest public-leaderboard lessons that are cheap and already
+implemented locally, then test them on our novel HRC mirrored-tail plus
+VocabMoE spine instead of only on the old sub-4 shapes.
+
+Runner group: `--candidate-group cap16_leaderboard`.
+
+Ingredients:
+
+- Same lossless CaseOps/SP8192, q6 train-time forward, VocabMoE
+  `input,loop_first`, HRC route, fused QKV, fp16 Muon, and LQER r16/t32 spine as
+  the mainline d768/e320 candidates.
+- `MUON_NS_VARIANT=polar_express` and `LR_MIN_SCALE=0.026`, matching the public
+  Polar/MIN_LR idea while keeping the rest of the run auditable.
+- QK-gain push from `5.25` to `5.5` as a one-row transfer test.
+- Sparse attention gate as a mutually exclusive replacement for the older
+  attention-output gate.
+- Parallel residual mixer on the last three HRC tail layers.
+- Moderate Huber Muon WD at `0.04`; this tests compressibility pressure without
+  jumping straight to the public `0.09` region that has been unstable in local
+  stacks.
+- BigramHash side channel as a compact lexical/context feature.
+- Local legal score-first TTT control canary. This is score-before-update and
+  target-independent, but still a local single-GPU canary until the TTT path is
+  made distributed-safe.
+
+Rows:
+
+- `leader_i3l3r3_d768e320_q6all_polar_minlr_vocabmoe_qk525_lqer16t32`
+- `leader_i3l3r3_d768e320_q6all_polar_minlr_vocabmoe_qk550_lqer16t32`
+- `leader_i3l3r3_d768e320_q6all_sparsegate_polar_minlr_vocabmoe_lqer16t32`
+- `leader_i3l3r3_d768e320_q6all_parres3_polar_minlr_vocabmoe_lqer16t32`
+- `leader_i3l3r3_d768e320_q6all_wd04_polar_minlr_vocabmoe_lqer16t32`
+- `leader_i3l5r2_d768e320_q6all_polar_minlr_vocabmoe_qk525_lqer16t32`
+- `leader_i3l5r2_d768e320_q8q6q6_q4core_sparsegate_polar_minlr_vocabmoe_lqer16t32`
+- `leader_i3l3r3_d768e320_q6all_bigram_polar_minlr_vocabmoe_lqer16t32`
+- `leader_i3l3r3_d768e320_q6all_ttt_control24_vocabmoe_qk525_lqer16t32`
+
+Decision:
+
+- Promote any row that beats the matching mainline d768/e320 spine after final
+  artifact roundtrip.
+- If QK 5.5 wins, make it the next cap-speed default.
+- If sparse gate wins, stop spending rows on the older attention-output gate.
+- If WD helps artifact size but hurts BPB, keep it as a final compression knob
+  rather than a default training knob.
+- If the TTT canary helps meaningfully, the next implementation task is
+  distributed-safe phased/LoRA TTT, not more council-style eval mixtures.
 
 ## 16MB Dual-Stream Advisor
 

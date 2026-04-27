@@ -2,9 +2,11 @@ param(
     [string] $Root = "C:\Users\corbe\Documents\golf\workspace\parameter-golf",
     [int] $WaitPid = 0,
     [int] $LongIterations = 5000,
+    [int] $LeaderboardIterations = 5000,
     [int] $TopK = 6,
     [int] $DualIterations = 5000,
-    [double] $DualThresholdBpb = 1.95
+    [double] $DualThresholdBpb = 1.95,
+    [switch] $SkipLeaderboard
 )
 
 $ErrorActionPreference = "Stop"
@@ -55,6 +57,32 @@ if ($WaitPid -gt 0) {
         Start-Sleep -Seconds 30
     }
     Write-QueueLog "wait pid=$WaitPid finished"
+}
+
+if (-not $SkipLeaderboard) {
+    $leaderOut = Join-Path $Root "records\cap16-leaderboard-5k-${LeaderboardIterations}-auto-$stamp"
+    Write-QueueLog "starting leaderboard-inspired 5k queue out=$leaderOut group=cap16_leaderboard"
+    $leaderArgs = @(
+        "scripts\run_16mb_vocab_moe_matrix.py",
+        "--candidate-group", "cap16_leaderboard",
+        "--out", $leaderOut,
+        "--iterations", "$LeaderboardIterations",
+        "--warmdown-iters", "$LeaderboardIterations",
+        "--val-tokens", "131072",
+        "--timeout", "18000",
+        "--final-artifacts",
+        "--train-quant-forward",
+        "--wait-for-idle-gpu",
+        "--idle-max-util", "90",
+        "--idle-max-memory-mib", "2500",
+        "--idle-seconds", "5"
+    )
+    & $python @leaderArgs *>&1 | Tee-Object -FilePath $logPath -Append | Out-Null
+    $leaderExit = $LASTEXITCODE
+    Write-QueueLog "leaderboard-inspired 5k queue exited code=$leaderExit out=$leaderOut"
+    if ($leaderExit -ne 0) {
+        exit $leaderExit
+    }
 }
 
 $csvs = @()

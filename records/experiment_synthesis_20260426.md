@@ -120,6 +120,10 @@ engineering interpretation.
   `cap16_dual_stream` adds a trained low-rank left/right advisor bridge at input,
   loop-entry, and pre-output sites so the dual-brain idea is trained end-to-end
   rather than added as eval-only council.
+- 2026-04-27 queue update: `cap16_leaderboard` now ports public-leaderboard
+  levers onto the HRC/VocabMoE spine at 5k steps: Polar/MIN_LR, QK 5.5, sparse
+  attention gate, parallel residuals, moderate Huber Muon WD, BigramHash, and a
+  local legal score-first TTT canary.
 
 ## Tokenizer Lessons
 
