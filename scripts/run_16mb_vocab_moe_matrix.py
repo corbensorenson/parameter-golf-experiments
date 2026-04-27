@@ -121,6 +121,63 @@ def vocab_moe_env(
     }
 
 
+BEST_CLEAN_VOCABMOE = vocab_moe_env(
+    experts=16,
+    rank=2,
+    mode="hybrid",
+    layers="input,loop_first",
+)
+
+
+def council_env(
+    *,
+    mode: str = "base_mirror",
+    mirror: str = "signperm",
+    offsets: str = "0,-2",
+    conf_scale: float = 1.0,
+    train_mode: str = "eval_only",
+    hard_gate: bool = False,
+    threshold: float = 6.0,
+) -> dict[str, str]:
+    return {
+        "HRC_COUNCIL_MODE": mode,
+        "HRC_MIRROR_MODE": mirror,
+        "HRC_COUNCIL_TRAIN_MODE": train_mode,
+        "HRC_COUNCIL_DEPTH_OFFSETS": offsets,
+        "HRC_COUNCIL_CONF_SCALE_INIT": f"{conf_scale:g}",
+        "HRC_COUNCIL_HARD_GATE": "1" if hard_gate else "0",
+        "HRC_COUNCIL_ENTROPY_THRESHOLD": f"{threshold:g}",
+        "HRC_COUNCIL_ENTROPY_SHARPNESS": "8.0",
+        "HRC_COUNCIL_SANITIZE": "1",
+        "HRC_COUNCIL_LOGIT_CLAMP": "60",
+    }
+
+
+def dynamic_council_env(*, threshold: float = 6.0, min_gate: float = 0.01) -> dict[str, str]:
+    return {
+        **council_env(hard_gate=True, threshold=threshold),
+        "HRC_DYNAMIC_COUNCIL_ENABLED": "1",
+        "HRC_DYNAMIC_COUNCIL_THRESHOLD": f"{threshold:g}",
+        "HRC_DYNAMIC_COUNCIL_SHARPNESS": "8.0",
+        "HRC_DYNAMIC_COUNCIL_MIN_GATE": f"{min_gate:g}",
+    }
+
+
+def rlm_memory_env(*, inject: str = "input", decay: float = 0.90, scale: float = 0.02) -> dict[str, str]:
+    return {
+        "RLM_MEMORY_ENABLED": "1",
+        "RLM_MEMORY_TRAIN_ENABLED": "1",
+        "RLM_MEMORY_DECAY": f"{decay:g}",
+        "RLM_MEMORY_SCALE_INIT": f"{scale:g}",
+        "RLM_MEMORY_INJECT": inject,
+        "RLM_MEMORY_UPDATE": "hidden_mean",
+        "RLM_MEMORY_RESET_EACH_EVAL": "1",
+        # Smaller validation batches let the legal prefix memory update more
+        # often without seeing targets from the current chunk.
+        "VAL_BATCH_SIZE": "4096",
+    }
+
+
 CANDIDATES: list[dict[str, Any]] = [
     {
         "name": "i3l3r3_d640e256_q6_stable_control",
@@ -424,11 +481,143 @@ SPIKE_CANDIDATES: list[dict[str, Any]] = [
 ]
 
 
+COUNCIL_RLM_CANDIDATES: list[dict[str, Any]] = [
+    {
+        "name": "i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_input_loopfirst_anchor",
+        "env": {
+            **BASE_16MB,
+            **BEST_CLEAN_VOCABMOE,
+        },
+        "notes": "best completed clean VocabMoE lane anchor for council/RLM comparisons",
+    },
+    {
+        "name": "i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_input_loopfirst_council_signperm_o0m2",
+        "env": {
+            **BASE_16MB,
+            **BEST_CLEAN_VOCABMOE,
+            **council_env(mirror="signperm", offsets="0,-2"),
+        },
+        "notes": "eval-only self-consistency council: base plus sign-permutation peer, shallower mirror",
+    },
+    {
+        "name": "i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_input_loopfirst_council_house_o0m2",
+        "env": {
+            **BASE_16MB,
+            **BEST_CLEAN_VOCABMOE,
+            **council_env(mirror="householder", offsets="0,-2"),
+        },
+        "notes": "eval-only council with householder peer transform",
+    },
+    {
+        "name": "i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_input_loopfirst_council_signperm_o00",
+        "env": {
+            **BASE_16MB,
+            **BEST_CLEAN_VOCABMOE,
+            **council_env(mirror="signperm", offsets="0,0"),
+        },
+        "notes": "same-depth base/mirror council; checks whether the -2 depth offset is too conservative",
+    },
+    {
+        "name": "i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_input_loopfirst_council_hybrid_o00m1",
+        "env": {
+            **BASE_16MB,
+            **BEST_CLEAN_VOCABMOE,
+            **council_env(mode="base_mirror_hybrid", mirror="signperm", offsets="0,0,-1"),
+        },
+        "notes": "three-peer base/mirror/hybrid council; adapts the requested 0,-1 offsets to one value per peer",
+    },
+    {
+        "name": "i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_input_loopfirst_council_hard_t60",
+        "env": {
+            **BASE_16MB,
+            **BEST_CLEAN_VOCABMOE,
+            **council_env(mirror="signperm", offsets="0,-2", hard_gate=True, threshold=6.0),
+        },
+        "notes": "entropy-gated self-consistency: mix the peer only where base uncertainty is high",
+    },
+    {
+        "name": "i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_input_loopfirst_dynamic_council_t60",
+        "env": {
+            **BASE_16MB,
+            **BEST_CLEAN_VOCABMOE,
+            **dynamic_council_env(threshold=6.0, min_gate=0.01),
+        },
+        "notes": "dynamic-depth analogue: run the mirror peer only for eval chunks with hard-token entropy",
+    },
+    {
+        "name": "i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_input_loopfirst_dynamic_council_t55",
+        "env": {
+            **BASE_16MB,
+            **BEST_CLEAN_VOCABMOE,
+            **dynamic_council_env(threshold=5.5, min_gate=0.01),
+        },
+        "notes": "more aggressive dynamic council threshold",
+    },
+    {
+        "name": "i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_input_loopfirst_rlm_input_d90_s002",
+        "env": {
+            **BASE_16MB,
+            **BEST_CLEAN_VOCABMOE,
+            **rlm_memory_env(inject="input", decay=0.90, scale=0.02),
+        },
+        "notes": "legal RLM-lite prefix memory, injected at the next chunk's input",
+    },
+    {
+        "name": "i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_input_loopfirst_rlm_loopfirst_d90_s002",
+        "env": {
+            **BASE_16MB,
+            **BEST_CLEAN_VOCABMOE,
+            **rlm_memory_env(inject="loop_first", decay=0.90, scale=0.02),
+        },
+        "notes": "prefix memory injected only at recurrent-core entry",
+    },
+    {
+        "name": "i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_input_loopfirst_rlm_inputloop_d95_s001",
+        "env": {
+            **BASE_16MB,
+            **BEST_CLEAN_VOCABMOE,
+            **rlm_memory_env(inject="input_loop_first", decay=0.95, scale=0.01),
+        },
+        "notes": "slower-decay prefix memory at input and loop entry",
+    },
+    {
+        "name": "i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_input_loopfirst_rlm_council_signperm",
+        "env": {
+            **BASE_16MB,
+            **BEST_CLEAN_VOCABMOE,
+            **rlm_memory_env(inject="input", decay=0.90, scale=0.02),
+            **council_env(mirror="signperm", offsets="0,-2"),
+        },
+        "notes": "RLM-lite persistent prefix plus eval-only self-consistency council",
+    },
+    {
+        "name": "i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_loopevery3_s002_council_signperm",
+        "env": {
+            **BASE_16MB,
+            **vocab_moe_env(experts=16, rank=2, mode="hybrid", layers="loop_every3", scale=0.02),
+            **council_env(mirror="signperm", offsets="0,-2"),
+        },
+        "notes": "stabilized loop-every-3 adapter plus eval-only base/mirror council",
+    },
+    {
+        "name": "i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_input_loopevery3_s002_rlm_council",
+        "env": {
+            **BASE_16MB,
+            **vocab_moe_env(experts=16, rank=2, mode="hybrid", layers="input,loop_every3", scale=0.02),
+            **rlm_memory_env(inject="input", decay=0.90, scale=0.02),
+            **council_env(mirror="signperm", offsets="0,-2"),
+        },
+        "notes": "high-upside combined row: stabilized recurrent VocabMoE, RLM-lite memory, and council",
+    },
+]
+
+
 CANDIDATE_GROUPS: dict[str, list[dict[str, Any]]] = {
     "default": CANDIDATES,
     "vocabmoe": CANDIDATES,
     "vocabmoe_spike": SPIKE_CANDIDATES,
-    "all": CANDIDATES + SPIKE_CANDIDATES,
+    "council_rlm": COUNCIL_RLM_CANDIDATES,
+    "all": CANDIDATES + SPIKE_CANDIDATES + COUNCIL_RLM_CANDIDATES,
 }
 
 
@@ -475,6 +664,28 @@ def write_candidate_plan(out_dir: Path, candidates: list[dict[str, Any]], iterat
             f"unique={env['NUM_UNIQUE_BLOCKS']} depth={env['EFFECTIVE_DEPTH']} "
             f"start={env['HRC_RECURSIVE_CORE_START']} repeats={env['HRC_ROUTE_REPEATS']}"
         )
+        extras: list[str] = []
+        if env.get("HRC_COUNCIL_MODE", "none") != "none":
+            extras.append(
+                "council="
+                f"{env.get('HRC_COUNCIL_MODE')} mirror={env.get('HRC_MIRROR_MODE', 'default')} "
+                f"offsets={env.get('HRC_COUNCIL_DEPTH_OFFSETS', 'default')} "
+                f"hard={env.get('HRC_COUNCIL_HARD_GATE', '0')}"
+            )
+        if env.get("HRC_DYNAMIC_COUNCIL_ENABLED") == "1":
+            extras.append(
+                "dynamic="
+                f"t{env.get('HRC_DYNAMIC_COUNCIL_THRESHOLD')} "
+                f"min_gate={env.get('HRC_DYNAMIC_COUNCIL_MIN_GATE')}"
+            )
+        if env.get("RLM_MEMORY_ENABLED") == "1":
+            extras.append(
+                "rlm="
+                f"{env.get('RLM_MEMORY_INJECT')} decay={env.get('RLM_MEMORY_DECAY')} "
+                f"scale={env.get('RLM_MEMORY_SCALE_INIT')}"
+            )
+        if extras:
+            moe = f"{moe}; " + "; ".join(extras)
         lines.append(f"| `{candidate['name']}` | `{route}` | `{moe}` | {candidate['notes']} |")
     (out_dir / "candidate_plan.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 

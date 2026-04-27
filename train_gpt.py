@@ -159,6 +159,17 @@ class Hyperparameters:
     hrc_council_sanitize = bool(int(os.environ.get("HRC_COUNCIL_SANITIZE", "0")))
     hrc_council_logit_clamp = float(os.environ.get("HRC_COUNCIL_LOGIT_CLAMP", "0.0"))
     hrc_council_debug_nonfinite = bool(int(os.environ.get("HRC_COUNCIL_DEBUG_NONFINITE", "0")))
+    hrc_dynamic_council_enabled = bool(int(os.environ.get("HRC_DYNAMIC_COUNCIL_ENABLED", "0")))
+    hrc_dynamic_council_threshold = float(os.environ.get("HRC_DYNAMIC_COUNCIL_THRESHOLD", "6.0"))
+    hrc_dynamic_council_sharpness = float(os.environ.get("HRC_DYNAMIC_COUNCIL_SHARPNESS", "8.0"))
+    hrc_dynamic_council_min_gate = float(os.environ.get("HRC_DYNAMIC_COUNCIL_MIN_GATE", "0.01"))
+    rlm_memory_enabled = bool(int(os.environ.get("RLM_MEMORY_ENABLED", "0")))
+    rlm_memory_train_enabled = bool(int(os.environ.get("RLM_MEMORY_TRAIN_ENABLED", "1")))
+    rlm_memory_decay = float(os.environ.get("RLM_MEMORY_DECAY", "0.90"))
+    rlm_memory_scale_init = float(os.environ.get("RLM_MEMORY_SCALE_INIT", "0.02"))
+    rlm_memory_inject = os.environ.get("RLM_MEMORY_INJECT", "input").strip().lower()
+    rlm_memory_update = os.environ.get("RLM_MEMORY_UPDATE", "hidden_mean").strip().lower()
+    rlm_memory_reset_each_eval = bool(int(os.environ.get("RLM_MEMORY_RESET_EACH_EVAL", "1")))
     hrc_cycle_fuse_enabled = bool(int(os.environ.get("HRC_CYCLE_FUSE_ENABLED", "0")))
     hrc_cycle_fuse_taps = os.environ.get("HRC_CYCLE_FUSE_TAPS", "").strip()
     hrc_cycle_fuse_inject_mode = os.environ.get("HRC_CYCLE_FUSE_INJECT_MODE", "repeat_phase").strip().lower()
@@ -618,6 +629,33 @@ def load_validation_token_bytes(pattern: str, expected_len: int) -> Tensor | Non
     return token_bytes
 
 
+def unwrap_runtime_model(model: nn.Module) -> nn.Module:
+    module = model.module if hasattr(model, "module") else model
+    return module._orig_mod if hasattr(module, "_orig_mod") else module
+
+
+def snapshot_rlm_memory(model: nn.Module) -> tuple[Tensor | None, bool] | None:
+    owner = unwrap_runtime_model(model)
+    snapshot = getattr(owner, "snapshot_rlm_memory", None)
+    return snapshot() if callable(snapshot) else None
+
+
+def reset_rlm_memory(model: nn.Module) -> None:
+    owner = unwrap_runtime_model(model)
+    reset = getattr(owner, "reset_rlm_memory", None)
+    if callable(reset):
+        reset()
+
+
+def restore_rlm_memory(model: nn.Module, snapshot: tuple[Tensor | None, bool] | None) -> None:
+    if snapshot is None:
+        return
+    owner = unwrap_runtime_model(model)
+    restore = getattr(owner, "restore_rlm_memory", None)
+    if callable(restore):
+        restore(snapshot)
+
+
 def eval_val(
     args: Hyperparameters,
     model: nn.Module,
@@ -661,6 +699,9 @@ def eval_val(
     val_loss_sum = torch.zeros((), device=device, dtype=torch.float64)
     val_token_count = torch.zeros((), device=device, dtype=torch.float64)
     val_byte_count = torch.zeros((), device=device, dtype=torch.float64)
+    saved_rlm_memory = snapshot_rlm_memory(model) if args.rlm_memory_enabled else None
+    if args.rlm_memory_enabled and args.rlm_memory_reset_each_eval:
+        reset_rlm_memory(model)
     model.eval()
     with torch.inference_mode():
         for batch_seq_start in range(seq_start, seq_end, local_batch_seqs):
@@ -702,6 +743,7 @@ def eval_val(
     bits_per_token = val_loss.item() / math.log(2.0)
     tokens_per_byte = val_token_count.item() / val_byte_count.item()
     model.train()
+    restore_rlm_memory(model, saved_rlm_memory)
     return float(val_loss.item()), float(bits_per_token * tokens_per_byte)
 
 
@@ -857,6 +899,9 @@ def eval_val_score_first_ttt(
     if prefix_limit <= 0:
         prefix_limit = total_seqs * args.train_seq_len
     updates = 0
+    saved_rlm_memory = snapshot_rlm_memory(model) if args.rlm_memory_enabled else None
+    if args.rlm_memory_enabled and args.rlm_memory_reset_each_eval:
+        reset_rlm_memory(model)
     try:
         model.eval()
         for batch_seq_start in range(0, total_seqs, local_batch_seqs):
@@ -920,6 +965,7 @@ def eval_val_score_first_ttt(
             param.grad = None
         for param, requires_grad in saved_requires_grad:
             param.requires_grad_(requires_grad)
+        restore_rlm_memory(model, saved_rlm_memory)
     val_loss = val_loss_sum / val_token_count
     bits_per_token = val_loss.item() / math.log(2.0)
     tokens_per_byte = val_token_count.item() / val_byte_count.item()
@@ -999,6 +1045,7 @@ CONTROL_TENSOR_NAME_PATTERNS = tuple(
             "route_phase_scales,loop_index_scale,recur_inject_log_a,recur_inject_log_b,"
             "council_prior_logits,council_confidence_scale,council_entropy_threshold,"
             "council_entropy_sharpness,"
+            "rlm_memory_scale,"
             "cycle_fuse_weights,cycle_fuse_tap_scales,"
             "vocab_moe.scale,vocab_moe_site_bias,vocab_moe_site_scales"
         ),
@@ -1125,6 +1172,18 @@ if Hyperparameters.lqer_asym_group <= 0:
     raise ValueError(f"LQER_ASYM_GROUP must be >= 1, got {Hyperparameters.lqer_asym_group}")
 if Hyperparameters.lr_warmup_iters < 0:
     raise ValueError(f"LR_WARMUP_ITERS must be >= 0, got {Hyperparameters.lr_warmup_iters}")
+if Hyperparameters.rlm_memory_decay < 0.0 or Hyperparameters.rlm_memory_decay > 1.0:
+    raise ValueError(f"RLM_MEMORY_DECAY must be in [0, 1], got {Hyperparameters.rlm_memory_decay}")
+if Hyperparameters.rlm_memory_inject not in {"input", "loop_first", "input_loop_first"}:
+    raise ValueError(
+        "RLM_MEMORY_INJECT must be one of input|loop_first|input_loop_first, "
+        f"got {Hyperparameters.rlm_memory_inject!r}"
+    )
+if Hyperparameters.rlm_memory_update not in {"hidden_mean", "hidden_last"}:
+    raise ValueError(
+        "RLM_MEMORY_UPDATE must be one of hidden_mean|hidden_last, "
+        f"got {Hyperparameters.rlm_memory_update!r}"
+    )
 if Hyperparameters.loss_vocab_sample_size < 0:
     raise ValueError(f"LOSS_VOCAB_SAMPLE_SIZE must be >= 0, got {Hyperparameters.loss_vocab_sample_size}")
 if Hyperparameters.loss_token_stride <= 0:
@@ -3744,6 +3803,16 @@ class GPT(nn.Module):
         hrc_council_sanitize: bool = False,
         hrc_council_logit_clamp: float = 0.0,
         hrc_council_debug_nonfinite: bool = False,
+        hrc_dynamic_council_enabled: bool = False,
+        hrc_dynamic_council_threshold: float = 6.0,
+        hrc_dynamic_council_sharpness: float = 8.0,
+        hrc_dynamic_council_min_gate: float = 0.01,
+        rlm_memory_enabled: bool = False,
+        rlm_memory_train_enabled: bool = True,
+        rlm_memory_decay: float = 0.90,
+        rlm_memory_scale_init: float = 0.02,
+        rlm_memory_inject: str = "input",
+        rlm_memory_update: str = "hidden_mean",
         hrc_base_peer_mode: str = "none",
         hrc_pass_embed_enabled: bool = False,
         hrc_pass_embed_init_std: float = 0.003,
@@ -3885,7 +3954,27 @@ class GPT(nn.Module):
         self.council_logit_clamp = 0.0
         self.council_debug_nonfinite = False
         self._council_debug_emitted = False
+        self.dynamic_council_enabled = bool(hrc_dynamic_council_enabled)
+        self.dynamic_council_threshold_value = float(hrc_dynamic_council_threshold)
+        self.dynamic_council_sharpness_value = max(float(hrc_dynamic_council_sharpness), 1e-3)
+        self.dynamic_council_min_gate = max(float(hrc_dynamic_council_min_gate), 0.0)
         self.peer_mirror_mode_name = "signperm"
+        self.rlm_memory_enabled = bool(rlm_memory_enabled)
+        self.rlm_memory_train_enabled = bool(rlm_memory_train_enabled)
+        self.rlm_memory_decay = float(rlm_memory_decay)
+        self.rlm_memory_inject = str(rlm_memory_inject).strip().lower()
+        self.rlm_memory_update = str(rlm_memory_update).strip().lower()
+        self.rlm_memory_scale = (
+            nn.Parameter(torch.tensor([rlm_memory_scale_init], dtype=torch.float32))
+            if self.rlm_memory_enabled
+            else None
+        )
+        self.rlm_memory_has_state = False
+        self.register_buffer(
+            "rlm_memory_state",
+            torch.zeros((model_dim,), dtype=torch.float32),
+            persistent=False,
+        )
         token_embed_dim = self.factored_embed_dim if self.factored_embed_dim > 0 else model_dim
         self.tok_emb = nn.Embedding(vocab_size, token_embed_dim)
         self.embed_proj = (
@@ -4005,6 +4094,7 @@ class GPT(nn.Module):
         self.block_schedule: tuple[int, ...] = tuple(range(total_layers))
         self.block_repeat_schedule: tuple[int, ...] = tuple(0 for _ in range(total_layers))
         self.repeat_layer_flags: tuple[bool, ...] = tuple(False for _ in range(total_layers))
+        self.hrc_recursive_core_start = int(hrc_recursive_core_start)
         self.mirror_layer_modes: tuple[int, ...] = tuple(0 for _ in range(total_layers))
         self.route_phase_schedule: tuple[int, ...] = tuple(0 for _ in range(total_layers))
         self.route_phase_position_schedule: tuple[int, ...] = tuple(0 for _ in range(total_layers))
@@ -4457,6 +4547,60 @@ class GPT(nn.Module):
         site_bias = self.vocab_moe_site_bias[slot] if self.vocab_moe_site_bias is not None else None
         site_scale = self.vocab_moe_site_scales[slot] if self.vocab_moe_site_scales is not None else None
         return self.vocab_moe(x, input_ids, site_bias=site_bias, site_scale=site_scale)
+    def rlm_memory_active(self) -> bool:
+        return self.rlm_memory_enabled and ((not self.training) or self.rlm_memory_train_enabled)
+    def reset_rlm_memory(self) -> None:
+        self.rlm_memory_state.zero_()
+        self.rlm_memory_has_state = False
+    def snapshot_rlm_memory(self) -> tuple[Tensor | None, bool]:
+        if not self.rlm_memory_enabled:
+            return None, False
+        return self.rlm_memory_state.detach().clone(), bool(self.rlm_memory_has_state)
+    def restore_rlm_memory(self, snapshot: tuple[Tensor | None, bool]) -> None:
+        tensor, has_state = snapshot
+        if tensor is not None:
+            self.rlm_memory_state.copy_(tensor.to(device=self.rlm_memory_state.device, dtype=self.rlm_memory_state.dtype))
+        else:
+            self.rlm_memory_state.zero_()
+        self.rlm_memory_has_state = bool(has_state)
+    def _rlm_memory_site_enabled(self, site: str, layer_idx: int | None = None) -> bool:
+        if not self.rlm_memory_active() or self.rlm_memory_scale is None:
+            return False
+        if site == "input":
+            return self.rlm_memory_inject in {"input", "input_loop_first"}
+        if site == "loop_first":
+            if self.rlm_memory_inject not in {"loop_first", "input_loop_first"} or layer_idx is None:
+                return False
+            for pos, block_idx in enumerate(self.block_schedule):
+                if int(block_idx) >= int(self.hrc_recursive_core_start):
+                    return int(layer_idx) == int(pos)
+            return False
+        return False
+    def _apply_rlm_memory(self, x: Tensor, site: str, layer_idx: int | None = None) -> Tensor:
+        if not self._rlm_memory_site_enabled(site, layer_idx):
+            return x
+        memory = self.rlm_memory_state.to(device=x.device, dtype=x.dtype)
+        memory = F.rms_norm(memory, (memory.numel(),))
+        scale = self.rlm_memory_scale.to(dtype=x.dtype)[0]
+        return x + scale * memory[None, None, :]
+    def _update_rlm_memory_from_hidden(self, hidden: Tensor) -> None:
+        if not self.rlm_memory_active():
+            return
+        with torch.no_grad():
+            h = hidden.detach().float()
+            if self.rlm_memory_update == "hidden_last":
+                summary = h[:, -1, :].mean(dim=0)
+            else:
+                summary = h.mean(dim=(0, 1))
+            summary = F.rms_norm(summary, (summary.numel(),))
+            state = self.rlm_memory_state
+            if state.device != summary.device:
+                summary = summary.to(device=state.device)
+            if self.rlm_memory_has_state:
+                state.mul_(self.rlm_memory_decay).add_(summary.to(dtype=state.dtype), alpha=1.0 - self.rlm_memory_decay)
+            else:
+                state.copy_(summary.to(dtype=state.dtype))
+                self.rlm_memory_has_state = True
     def _tied_logits(self, x_flat: Tensor, output_mirror_mode: int = 0, output_peer_mode: str = "none") -> Tensor:
         if self.embed_proj_rev is not None:
             x_flat = self.embed_proj_rev(x_flat, mirror_mode=output_mirror_mode)
@@ -4686,6 +4830,7 @@ class GPT(nn.Module):
         if self.token_smear is not None:
             x = self.token_smear(x)
         x = self._apply_vocab_moe(x, input_ids, None)
+        x = self._apply_rlm_memory(x, "input")
         ve_cache: Tensor | None = None
         def ve_for_layer(layer_idx: int) -> Tensor | None:
             nonlocal ve_cache
@@ -4710,6 +4855,7 @@ class GPT(nn.Module):
             layer_peer_mode = self._layer_peer_mode(peer_mode, layer_idx, depth_limit)
             mirror_mode = self._layer_mirror_mode_for_peer(layer_idx, layer_peer_mode)
             prev_x = x
+            x = self._apply_rlm_memory(x, "loop_first", layer_idx)
             pass_control = self._pass_control_for_layer(layer_idx, mirror_mode, layer_peer_mode, x.dtype)
             if pass_control is not None:
                 x = x + pass_control[None, None, :]
@@ -4751,6 +4897,7 @@ class GPT(nn.Module):
             layer_peer_mode = self._layer_peer_mode(peer_mode, layer_idx, depth_limit)
             mirror_mode = self._layer_mirror_mode_for_peer(layer_idx, layer_peer_mode)
             prev_x = x
+            x = self._apply_rlm_memory(x, "loop_first", layer_idx)
             pass_control = self._pass_control_for_layer(layer_idx, mirror_mode, layer_peer_mode, x.dtype)
             if pass_control is not None:
                 x = x + pass_control[None, None, :]
@@ -4941,6 +5088,47 @@ class GPT(nn.Module):
         combined = stack[0] + gate[..., None] * (mixed - stack[0])
         combined = self._sanitize_council_tensor(combined, "combined_logits")
         return self.softcap(combined.to(dtype=peer_logits[0].dtype))
+    def _dynamic_council_loss(
+        self,
+        input_ids: Tensor,
+        target_ids: Tensor,
+        token_weights: Tensor | None = None,
+    ) -> Tensor:
+        base_hidden, base_mode, base_depth_limit = self._base_peer_hidden_state(input_ids)
+        base_logits_raw = self._project_hidden(base_hidden, base_mode, base_depth_limit)
+        base_logits = self.softcap(base_logits_raw)
+        with torch.no_grad():
+            probs = torch.softmax(base_logits.float(), dim=-1)
+            entropy = -(probs * torch.log(torch.clamp_min(probs, 1e-9))).sum(dim=-1)
+            gate = torch.sigmoid(
+                (entropy - float(self.dynamic_council_threshold_value)) * float(self.dynamic_council_sharpness_value)
+            )
+            run_peers = bool(float(gate.max().item()) > float(self.dynamic_council_min_gate))
+        if run_peers:
+            peer_states = [base_hidden]
+            for peer_mode, depth_limit in zip(self.peer_modes[1:], self.peer_depth_limits[1:]):
+                peer_states.append(self._run_hrc_peer(input_ids, peer_mode, depth_limit))
+            peer_logits = [base_logits_raw] + [
+                self._project_hidden(hidden, peer_mode, depth_limit)
+                for hidden, peer_mode, depth_limit in zip(
+                    peer_states[1:],
+                    self.peer_modes[1:],
+                    self.peer_depth_limits[1:],
+                )
+            ]
+            logits = self._synthesize_council(peer_logits)
+            if not self.council_hard_gate:
+                logits = base_logits + gate.to(dtype=base_logits.dtype)[..., None] * (logits - base_logits)
+                logits = self.softcap(logits)
+        else:
+            logits = base_logits
+        loss = cross_entropy_with_optional_weights(
+            logits.reshape(-1, self.tok_emb.num_embeddings),
+            target_ids.reshape(-1),
+            token_weights,
+        )
+        self._update_rlm_memory_from_hidden(base_hidden)
+        return loss
     def forward(
         self,
         input_ids: Tensor,
@@ -4957,18 +5145,24 @@ class GPT(nn.Module):
                         (not self.training) or self.council_train_mode != "eval_only"
                     )
                 if use_council:
+                    if self.dynamic_council_enabled and (not self.training):
+                        return self._dynamic_council_loss(input_ids, target_ids, token_weights)
                     peer_states = self._peer_hidden_states(input_ids)
                     logits = self._synthesize_council(self._peer_logits_from_hidden_states(peer_states)).reshape(-1, self.tok_emb.num_embeddings)
-                    return cross_entropy_with_optional_weights(logits, targets, token_weights)
+                    loss = cross_entropy_with_optional_weights(logits, targets, token_weights)
+                    self._update_rlm_memory_from_hidden(peer_states[0])
+                    return loss
                 else:
                     base_hidden, base_mode, base_depth_limit = self._base_peer_hidden_state(input_ids)
-                    return self._hidden_ntp_loss(
+                    loss = self._hidden_ntp_loss(
                         base_hidden,
                         target_ids,
                         token_weights=token_weights,
                         peer_mode=base_mode,
                         depth_limit=base_depth_limit,
                     )
+                    self._update_rlm_memory_from_hidden(base_hidden)
+                    return loss
         x = self._embed_tokens(input_ids)
         if self.bigram is not None:
             x = x + self.bigram(input_ids).to(dtype=x.dtype)
@@ -5276,6 +5470,16 @@ def main() -> None:
         hrc_council_sanitize=args.hrc_council_sanitize,
         hrc_council_logit_clamp=args.hrc_council_logit_clamp,
         hrc_council_debug_nonfinite=args.hrc_council_debug_nonfinite,
+        hrc_dynamic_council_enabled=args.hrc_dynamic_council_enabled,
+        hrc_dynamic_council_threshold=args.hrc_dynamic_council_threshold,
+        hrc_dynamic_council_sharpness=args.hrc_dynamic_council_sharpness,
+        hrc_dynamic_council_min_gate=args.hrc_dynamic_council_min_gate,
+        rlm_memory_enabled=args.rlm_memory_enabled,
+        rlm_memory_train_enabled=args.rlm_memory_train_enabled,
+        rlm_memory_decay=args.rlm_memory_decay,
+        rlm_memory_scale_init=args.rlm_memory_scale_init,
+        rlm_memory_inject=args.rlm_memory_inject,
+        rlm_memory_update=args.rlm_memory_update,
         hrc_base_peer_mode=args.hrc_base_peer_mode,
         hrc_pass_embed_enabled=args.hrc_pass_embed_enabled,
         hrc_pass_embed_init_std=args.hrc_pass_embed_init_std,
@@ -5674,6 +5878,17 @@ def main() -> None:
             f"hrc_council_sanitize:{int(args.hrc_council_sanitize)} "
             f"hrc_council_logit_clamp:{args.hrc_council_logit_clamp} "
             f"hrc_council_debug_nonfinite:{int(args.hrc_council_debug_nonfinite)} "
+            f"hrc_dynamic_council_enabled:{int(args.hrc_dynamic_council_enabled)} "
+            f"hrc_dynamic_council_threshold:{args.hrc_dynamic_council_threshold} "
+            f"hrc_dynamic_council_sharpness:{args.hrc_dynamic_council_sharpness} "
+            f"hrc_dynamic_council_min_gate:{args.hrc_dynamic_council_min_gate} "
+            f"rlm_memory_enabled:{int(args.rlm_memory_enabled)} "
+            f"rlm_memory_train_enabled:{int(args.rlm_memory_train_enabled)} "
+            f"rlm_memory_decay:{args.rlm_memory_decay} "
+            f"rlm_memory_scale_init:{args.rlm_memory_scale_init} "
+            f"rlm_memory_inject:{args.rlm_memory_inject} "
+            f"rlm_memory_update:{args.rlm_memory_update} "
+            f"rlm_memory_reset_each_eval:{int(args.rlm_memory_reset_each_eval)} "
             f"hrc_base_peer_mode:{args.hrc_base_peer_mode} "
             f"hrc_pass_embed_enabled:{int(args.hrc_pass_embed_enabled)} "
             f"hrc_pass_embed_mode:{args.hrc_pass_embed_mode} "
@@ -5848,6 +6063,7 @@ def main() -> None:
         return (t2, t3)
     # Warmup primes the compiled forward/backward/optimizer paths, then we restore the
     # initial weights/optimizer state so measured training starts from the true init.
+    reset_rlm_memory(base_model)
     if args.warmup_steps > 0:
         initial_model_state = {name: tensor.detach().cpu().clone() for name, tensor in base_model.state_dict().items()}
         initial_optimizer_states = [copy.deepcopy(opt.state_dict()) for opt in optimizers]
@@ -5896,6 +6112,7 @@ def main() -> None:
         if distributed:
             model.require_backward_grad_sync = True
         train_loader = DistributedTokenLoader(args.train_files, rank, world_size, device)
+    reset_rlm_memory(base_model)
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats()
     # -----------------------------

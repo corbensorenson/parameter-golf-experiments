@@ -25,3 +25,5 @@ final_model.int8.ptz
 *.safetensors
 records/*/
 !records/*.md
+records/*.log
+records/*.pid

@@ -342,6 +342,88 @@ Current read:
 - It is queued after the existing 16MB VocabMoE, sub4 leader-levers, and
   width-ladder queues so it does not interrupt the current experiments.
 
+## 16MB Council, Dynamic Depth, And RLM-Lite
+
+Goal: revive the council idea on the current clean VocabMoE lane, and test a
+legal recursive-language-model style memory without leaking validation targets.
+
+References:
+
+- Recursive Language Models, for the broad idea of recursively compressing
+  context into a persistent state:
+  <https://arxiv.org/abs/2512.24601>
+- Mixture-of-Depths, for conditional extra compute using a routing decision:
+  <https://arxiv.org/abs/2404.02258>
+- Self-consistency, translated here as mixing full predictive distributions
+  before the realized token is known:
+  <https://arxiv.org/abs/2203.11171>
+- Parameter Golf legality discussion on strict causal dependence and
+  score-before-update:
+  <https://github.com/openai/parameter-golf/issues/1017>
+
+Knobs:
+
+- `HRC_COUNCIL_MODE=base_mirror|base_mirror_hybrid`
+- `HRC_COUNCIL_TRAIN_MODE=eval_only`
+- `HRC_COUNCIL_DEPTH_OFFSETS`, one value per peer
+- `HRC_COUNCIL_HARD_GATE=1`
+- `HRC_DYNAMIC_COUNCIL_ENABLED=1`
+- `HRC_DYNAMIC_COUNCIL_THRESHOLD`
+- `HRC_DYNAMIC_COUNCIL_MIN_GATE`
+- `RLM_MEMORY_ENABLED=1`
+- `RLM_MEMORY_TRAIN_ENABLED=1`
+- `RLM_MEMORY_DECAY`
+- `RLM_MEMORY_SCALE_INIT`
+- `RLM_MEMORY_INJECT=input|loop_first|input_loop_first`
+- runner group: `--candidate-group council_rlm` in
+  `scripts/run_16mb_vocab_moe_matrix.py`
+
+Implementation:
+
+- Council remains a score-first distribution mixture: base and peer logits are
+  projected into full vocabulary distributions, entropy/confidence weights are
+  computed without the target, and the mixed logits are scored once.
+- Dynamic council runs the base peer first, computes base entropy, and only runs
+  the mirror peer for evaluation chunks whose base entropy crosses the chosen
+  gate. This is a batch/chunk-level Mixture-of-Depths analogue; it is not a
+  target-conditioned vote.
+- RLM-lite adds a non-persistent prefix memory buffer initialized to zero at
+  validation start. The model injects that memory into the next chunk, scores
+  the current chunk, then updates memory from the just-scored hidden states.
+  Current-chunk tokens never get memory derived from their own targets.
+- The memory buffer is not serialized into the artifact. Only the small learned
+  injection scale is saved, so every evaluation replay starts from the same
+  deterministic zero memory.
+- Validation uses smaller `VAL_BATCH_SIZE=4096` on RLM rows so the memory can
+  update more often while staying causal.
+
+Queued local probes:
+
+- `i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_input_loopfirst_anchor`
+- `i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_input_loopfirst_council_signperm_o0m2`
+- `i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_input_loopfirst_council_house_o0m2`
+- `i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_input_loopfirst_council_signperm_o00`
+- `i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_input_loopfirst_council_hybrid_o00m1`
+- `i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_input_loopfirst_council_hard_t60`
+- `i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_input_loopfirst_dynamic_council_t60`
+- `i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_input_loopfirst_dynamic_council_t55`
+- `i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_input_loopfirst_rlm_input_d90_s002`
+- `i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_input_loopfirst_rlm_loopfirst_d90_s002`
+- `i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_input_loopfirst_rlm_inputloop_d95_s001`
+- `i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_input_loopfirst_rlm_council_signperm`
+- `i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_loopevery3_s002_council_signperm`
+- `i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_input_loopevery3_s002_rlm_council`
+
+Current read:
+
+- Implemented as fully opt-in code paths. Existing running matrices are
+  unaffected unless their env explicitly enables these knobs.
+- The strongest completed VocabMoE anchor is
+  `i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_input_loopfirst` at final export
+  `1.8710` BPB, so the council/RLM matrix is pinned to that row first.
+- The `base_mirror_hybrid` candidate uses offsets `0,0,-1`, because the
+  implementation correctly requires one depth offset per peer.
+
 ## Measurement And Legality Levers
 
 ### Final Artifact Round-Trip
