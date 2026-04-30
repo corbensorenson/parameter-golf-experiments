@@ -1,6 +1,6 @@
 # Project Levers
 
-Date: 2026-04-29
+Date: 2026-04-30
 
 This is the working lever catalog for the Parameter Golf experiments in this
 repo. It is meant to answer: "What knobs can we pull, what do they buy us, what
@@ -8,14 +8,21 @@ do they cost, and what have we already learned?"
 
 The short current read:
 
-- Current strategic read: because we have not verified on 8xH100, the best
-  near-term submission lane is non-record/art rather than official-record
-  chasing. The current matrix is therefore a weird-but-auditable showcase:
+- Current strategic read: because the self-funded 8xH100 window was only about
+  one hour and the best legal score stayed around `1.355`, the best near-term
+  submission lane is non-record/art rather than official-record chasing. The
+  current matrix is therefore a weird-but-auditable showcase:
   prime skip recurrence, mirrored IO tails, train-time precision/width ladders,
   spike/self-election LexLoRE/VocabMoE, legal RLM-lite memory, council
   distributions, and trained dual-stream advisor bridges. For the public names
   behind the code flags, see `records/architecture_explainer_20260430.md`. See
   `records/art_showcase_plan_20260429.md`.
+- Latest H100 architecture signal:
+  `break_prime_skip_superloop_d640e768` reached `1.35504224` final export BPB,
+  `107.87ms/step`, and `14,051,162` bytes. This is the best 1xH100 break-cliff
+  route so far. It keeps the mirrored IO tail but walks the recurrent core as
+  `012|34567|35746|210`, using skip-program diversity instead of simply adding
+  more repeats.
 - Paid H100 strategy: do not spend the budget on a vanilla leaderboard clone.
   First run the local `cap16_h100_preflight` group as a money-saving gate. The
   prepared H100 path is a five-row novel-contender scout around our own
@@ -2489,6 +2496,32 @@ Current read:
 - `i5l9r9` shows that more repeats can overdo the route: it was slower and
   worse than r5.
 - `i3l9r5` shows that dropping the q4 tail layer is too aggressive.
+
+### Prime-Skip HRC Route
+
+Example:
+
+- `break_prime_skip_superloop_d640e768`
+
+Use when:
+
+- Trying to improve MirrorLoop quality without paying for more physical blocks
+  or more full recurrent repeats.
+
+Knobs:
+
+- `HRC_DEPTH_SCHEDULE_MODE=prime_skip_superloop`
+- `HRC_SUPERLOOP_SKIP_SCHEDULE=0,1`
+- `HRC_LOOP_INDEX_ENABLED=1`
+
+Current read:
+
+- Best 1xH100 architecture signal after the 8x plateau.
+- Same 16 virtual steps as the plain i3/l5/r2 route, but faster and better:
+  `1.35504224` BPB, `107.87ms/step`, `14,051,162` bytes.
+- Almost `1.95MB` of headroom remains, so the next rows should spend bytes on
+  `d704/e768`, larger `e896/e1024`, modest LQER repair, or one extra
+  attention-enabled core block.
 
 ### i6/l9 Deep IO Tail
 

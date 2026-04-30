@@ -1,0 +1,157 @@
+logs/break_prime_skip_superloop_d640e768_20260430_200522.txt
+val_bpb:byte_sidecar tokenizer_kind=sentencepiece tokenizer_path=/workspace/parameter-golf-novel-8x-ready/upstream_records/records/track_10min_16mb/2026-04-18_PR1626_CaseOps_Taper/tokenizers/fineweb_8192_bpe_lossless_caps_caseops_v1_reserved.model
+train_loader:dataset:fineweb10B_sp8192_lossless_caps_caseops_v1_reserved train_shards:1
+val_loader:shards pattern=/workspace/parameter-golf-novel-8x-ready/upstream_records/records/track_10min_16mb/2026-04-18_PR1626_CaseOps_Taper/datasets/fineweb10B_sp8192_lossless_caps_caseops_v1_reserved/fineweb_val_*.bin tokens:4096
+WARNING: using VAL_TOKENS_LIMIT=4096 (effective_tokens:4096) for local proxy evaluation
+model_params:24210455
+model_family:hrc
+world_size:1 grad_accum_steps:1
+sdp_backends:cudnn=False flash=True mem_efficient=False math=False policy=auto capability=9.0 fallback=none
+compute_dtypes:autocast=bfloat16 params=float32 muon=float32 grad_scaler:0 cudnn_benchmark:True compile_enabled:0 compile_disabled_reason:env_disabled
+train_nonfinite_debug:0 train_abort_on_nonfinite:0 post_step_zero_grad:0
+host_io:pin_host_memory:1 prefetch_host_to_device:1 persistent_batch_buffers:1
+optimizer_preset:hybrid optimizer_count:3 adamw_weight_decay:0 sgd_momentum:0.9
+muon_config:backend_steps:5 momentum:0.95 ns_variant:polar_express weight_decay:0 wd_mode:huber huber_delta_scale:3 row_normalize:0
+attention_mode:gqa num_heads:10 num_kv_heads:1
+layer_kv_heads_schedule:1,1,1,1,1,1,1,1 strong_kv_sharing:False
+layer_width_schedule:640,640,640,640,640,640,640,640 width_ladder_enabled:0
+layer_mlp_mult_schedule:2.000,2.000,2.000,2.000,2.000,2.000,2.000,2.000 nonuniform_allocation:False
+xsa_last_n:0 xsa_gate_mode:none xsa_layers:0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+qsparse_enabled:0 qsparse_topk:0 qsparse_last_n:0 qsparse_gate_init:-1.5 qsparse_layers:0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+smear_gate_enabled:1 smear_gate_width:12 smear_gate_mode:vector bos_token_id:1 attn_out_gate_enabled:1 attn_out_gate_width:24 sparse_attn_gate_enabled:0 sparse_attn_gate_init_std:0 sparse_attn_gate_scale:1
+activation_kind:relu2 activation_negative_slope:0.5
+bigram_vocab_size:0 bigram_dim:96 bigram_init_std:0.0 bigram_scale_init:0.05
+ve_enabled:0 ve_dim:128 ve_layers:none
+vocab_moe_enabled:1 experts:16 rank:2 mode:hybrid layers:input,loop_first resolved_input:1 resolved_layers:3 scale_init:0.05 site_bias:1 site_scale:1 site_scale_init:1 temperature:1 activation:relu2 train_quant_bits:8 spike_top_k:0 spike_ste:1 spike_normalize:1
+dual_stream_enabled:0 left_dim:0 right_dim:0 rank:16 sites:input,loop_first resolved_input:None resolved_layers:none resolved_pre_output:None scale_init:0.02 activation:silu
+basis_xsa_enabled:False basis_rank:128 basis_share_group_size:3 basis_factorize_up:True basis_factorize_down:True
+parallel_residual_last_n:2 residual_mixer_enabled:False block_norm_enabled:1 attn_qk_norm_enabled:1 resid_mix_enabled:1 branch_scale_enabled:1 branch_scale_kind:vector depth_scale_init_enabled:False
+quant_train_mode:none quant_train_start_fraction:0.800 quant_train_every:1
+ttt_score_first_enabled:0 ttt_param_mode:control ttt_optimizer:sgd ttt_lr:0.0005 ttt_prefix_tokens:0 ttt_max_updates:0 ttt_phase_spec:none
+unique_blocks:8 effective_depth:16 depth_lora_rank:0
+hrc_depth_schedule_mode:prime_skip_superloop hrc_route_repeats:1 hrc_recursive_core_start:3 hrc_superloop_skip_schedule:0,1 hrc_council_mode:none hrc_council_train_mode:always hrc_council_depth_offsets:default hrc_council_conf_scale_init:1.0 hrc_council_hard_gate:0 hrc_council_entropy_threshold:6.0 hrc_council_entropy_sharpness:8.0 hrc_council_sanitize:0 hrc_council_logit_clamp:0.0 hrc_council_debug_nonfinite:0 hrc_dynamic_council_enabled:0 hrc_dynamic_council_threshold:6.0 hrc_dynamic_council_sharpness:8.0 hrc_dynamic_council_min_gate:0.01 rlm_memory_enabled:0 rlm_memory_train_enabled:1 rlm_memory_decay:0.9 rlm_memory_scale_init:0.02 rlm_memory_inject:input rlm_memory_update:hidden_mean rlm_memory_reset_each_eval:1 hrc_base_peer_mode:none hrc_pass_embed_enabled:1 hrc_pass_embed_mode:block_peer hrc_pass_role_mode:phase5 hrc_route_phase_enabled:1 hrc_mirror_mode:signperm hrc_depth_adapter_tie_mode:block hrc_recur_inject_enabled:1 hrc_recur_inject_log_a_init:0.0 hrc_recur_inject_log_b_init:-2.0 hrc_frozen_carry_enabled:0 hrc_frozen_carry_blocks:none hrc_frozen_carry_detach:1 hrc_cycle_fuse_enabled:0 hrc_cycle_fuse_inject_mode:repeat_phase hrc_cycle_fuse_taps:auto hrc_cycle_fuse_init_std:0.02 hrc_attn_only_blocks:none hrc_mlp_only_blocks:4,5,6,7
+virtual_block_schedule:0,1,2,3,4,5,6,7,3,5,7,4,6,2,1,0 virtual_block_repeats:0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1 virtual_mirror_layers:0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1
+shared_parallel_flags:0,0,0,0,0,0,1,1
+shared_branch_modes:full,full,full,full,mlp_only,mlp_only,mlp_only,mlp_only
+peer_modes:none peer_depth_limits:16
+virtual_route_phases:0,0,0,1,1,1,1,1,2,2,2,2,2,0,0,0 virtual_route_phase_positions:0,1,2,0,1,2,3,4,0,1,2,3,4,0,1,2 virtual_route_skip_ids:-1,-1,-1,0,0,0,0,0,1,1,1,1,1,-1,-1,-1 virtual_route_skip_hops:0,0,0,1,1,1,1,1,2,2,2,2,2,0,0,0
+superloop_shell_width:3 superloop_prime_width:5 superloop_skip_ids:0,1
+pass_role_schedule:0,1,1,1,1,1,1,2,2,3,3,3,3,3,3,4 pass_embed_schedule:0,1,2,3,4,5,6,7,3,5,7,4,6,2,1,0
+hrc_loop_index_enabled:1 hrc_loop_index_dim_requested:64 hrc_loop_index_dim_effective:64 hrc_loop_index_scale_init:0.02
+mtp_enabled:False t2(start=4000,ramp=2000,w=0.1) t3(start=7000,ramp=2500,w=0.05)
+tie_embeddings:True embed_lr:0.002 factored_embed_dim:768 head_lr:0.0 matrix_lr:0.0016 scalar_lr:0.0016
+logit_softcap:12 asym_logit_rescale:0
+train_ternary_blocks:0 train_ternary_group_size:64 train_ternary_scale_stat:mean train_ternary_param_dtype:fp32 train_casted_linear_param_dtype:fp32 train_quant_forward:1 train_quant_embeddings:1 train_quant_linear_count:26 train_quant_ternary_count:0 train_quant_skipped_small:6 train_ternary_packed_kernel:0 train_ternary_dense_kernel:0 keep_control_params_fp32:1 train_ternary_forward_cache:1 train_fused_qkv:1 bitnet_v2_hadamard:0 ternary_linear_count:0 fused_qkv_count:4
+train_batch_tokens:32768 train_seq_len:1024 iterations:1 warmup_steps:0 max_wallclock_seconds:45.000
+bpb_weighted_loss:0
+loss_fp32:1 loss_token_stride:1 loss_token_random_offset:1 loss_vocab_sample_size:0 loss_vocab_sample_correction:1
+lr_warmup_iters:0 lr_warmdown_style:cosine warmdown_iters:1 lr_min_scale:0.1
+microbatch_tokens:32768 microbatch_seqs:32
+quant_policy:default_bits=8 bits_overrides=none int8_promote=tok_emb.weight,lm_head.weight,embed_proj force_quant=vocab_moe.token_prior.weight,vocab_moe.down,vocab_moe.up ternary=none ternary_exclude=tok_emb.weight,lm_head.weight,embed_proj ternary_group=64 ternary_scale_stat=mean ternary_threshold=0.7 ternary_shrinkage_fix=1 lqer=1:10:20:4:asym1g64 lqer_include=blocks.,embed_proj lqer_exclude=tok_emb.weight,lm_head.weight,token_smear,attn_gate_w,attn_out_gate,vocab_moe,dual_stream codec=lzma codec_level=9 submission_cap=16000000
+seed:1337
+step:1/1 train_loss:9.0157 train_time:658ms step_avg:657.80ms
+step:1/1 val_loss:8.7386 val_bpb:3.9224 train_time:722ms step_avg:722.49ms
+peak memory allocated: 15564 MiB reserved: 16754 MiB
+Serialized model: skipped raw checkpoint SAVE_RAW_MODEL=0
+Code size: 334602 bytes
+Total submission size: 334602 bytes
+Serialized model int8/lqer20+lzma: 5865764 bytes (payload:24776988 raw_torch:24831569 payload_ratio:3.91x)
+export_payload_breakdown linear_by_bits:8:24256320 linear_payload:24256320 ternary_payload:0 lqer_payload:332160 passthrough_payload:188508
+Total submission size int8/lqer20+lzma: 6200366 bytes
+submission_cap:16000000 size:6200366 headroom:9799634 status:ok
+final_export_roundtrip val_loss:8.7540 val_bpb:3.9294 eval_time:16ms
+final_export_roundtrip_exact val_loss:8.75404930 val_bpb:3.92936716
+final_int8_zlib_roundtrip val_loss:8.7540 val_bpb:3.9294 legacy_alias:final_export_roundtrip codec:lzma
+final_int8_zlib_roundtrip_exact val_loss:8.75404930 val_bpb:3.92936716 legacy_alias:final_export_roundtrip_exact
+
+--- trainer logfile: /workspace/parameter-golf-novel-8x-ready/logs/break_prime_skip_superloop_d640e768_20260430_200522.txt ---
+====================================================================================================
+Running Python 3.12.3 (main, Nov  6 2025, 13:44:16) [GCC 13.3.0]
+Running PyTorch 2.9.1+cu128
+device:cuda name:NVIDIA H100 80GB HBM3 capability:9.0
+Thu Apr 30 20:05:28 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 580.126.09             Driver Version: 580.126.09     CUDA Version: 13.0     |
++-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA H100 80GB HBM3          On  |   00000000:3A:00.0 Off |                    0 |
+| N/A   33C    P0            107W /  700W |    1185MiB /  81559MiB |      0%      Default |
+|                                         |                        |             Disabled |
++-----------------------------------------+------------------------+----------------------+
+
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|    0   N/A  N/A           35936      C   /usr/local/bin/python                  1176MiB |
++-----------------------------------------------------------------------------------------+
+
+====================================================================================================
+val_bpb:byte_sidecar tokenizer_kind=sentencepiece tokenizer_path=/workspace/parameter-golf-novel-8x-ready/upstream_records/records/track_10min_16mb/2026-04-18_PR1626_CaseOps_Taper/tokenizers/fineweb_8192_bpe_lossless_caps_caseops_v1_reserved.model
+train_loader:dataset:fineweb10B_sp8192_lossless_caps_caseops_v1_reserved train_shards:1
+val_loader:shards pattern=/workspace/parameter-golf-novel-8x-ready/upstream_records/records/track_10min_16mb/2026-04-18_PR1626_CaseOps_Taper/datasets/fineweb10B_sp8192_lossless_caps_caseops_v1_reserved/fineweb_val_*.bin tokens:4096
+WARNING: using VAL_TOKENS_LIMIT=4096 (effective_tokens:4096) for local proxy evaluation
+model_params:24210455
+model_family:hrc
+world_size:1 grad_accum_steps:1
+sdp_backends:cudnn=False flash=True mem_efficient=False math=False policy=auto capability=9.0 fallback=none
+compute_dtypes:autocast=bfloat16 params=float32 muon=float32 grad_scaler:0 cudnn_benchmark:True compile_enabled:0 compile_disabled_reason:env_disabled
+train_nonfinite_debug:0 train_abort_on_nonfinite:0 post_step_zero_grad:0
+host_io:pin_host_memory:1 prefetch_host_to_device:1 persistent_batch_buffers:1
+optimizer_preset:hybrid optimizer_count:3 adamw_weight_decay:0 sgd_momentum:0.9
+muon_config:backend_steps:5 momentum:0.95 ns_variant:polar_express weight_decay:0 wd_mode:huber huber_delta_scale:3 row_normalize:0
+attention_mode:gqa num_heads:10 num_kv_heads:1
+layer_kv_heads_schedule:1,1,1,1,1,1,1,1 strong_kv_sharing:False
+layer_width_schedule:640,640,640,640,640,640,640,640 width_ladder_enabled:0
+layer_mlp_mult_schedule:2.000,2.000,2.000,2.000,2.000,2.000,2.000,2.000 nonuniform_allocation:False
+xsa_last_n:0 xsa_gate_mode:none xsa_layers:0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+qsparse_enabled:0 qsparse_topk:0 qsparse_last_n:0 qsparse_gate_init:-1.5 qsparse_layers:0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+smear_gate_enabled:1 smear_gate_width:12 smear_gate_mode:vector bos_token_id:1 attn_out_gate_enabled:1 attn_out_gate_width:24 sparse_attn_gate_enabled:0 sparse_attn_gate_init_std:0 sparse_attn_gate_scale:1
+activation_kind:relu2 activation_negative_slope:0.5
+bigram_vocab_size:0 bigram_dim:96 bigram_init_std:0.0 bigram_scale_init:0.05
+ve_enabled:0 ve_dim:128 ve_layers:none
+vocab_moe_enabled:1 experts:16 rank:2 mode:hybrid layers:input,loop_first resolved_input:1 resolved_layers:3 scale_init:0.05 site_bias:1 site_scale:1 site_scale_init:1 temperature:1 activation:relu2 train_quant_bits:8 spike_top_k:0 spike_ste:1 spike_normalize:1
+dual_stream_enabled:0 left_dim:0 right_dim:0 rank:16 sites:input,loop_first resolved_input:None resolved_layers:none resolved_pre_output:None scale_init:0.02 activation:silu
+basis_xsa_enabled:False basis_rank:128 basis_share_group_size:3 basis_factorize_up:True basis_factorize_down:True
+parallel_residual_last_n:2 residual_mixer_enabled:False block_norm_enabled:1 attn_qk_norm_enabled:1 resid_mix_enabled:1 branch_scale_enabled:1 branch_scale_kind:vector depth_scale_init_enabled:False
+quant_train_mode:none quant_train_start_fraction:0.800 quant_train_every:1
+ttt_score_first_enabled:0 ttt_param_mode:control ttt_optimizer:sgd ttt_lr:0.0005 ttt_prefix_tokens:0 ttt_max_updates:0 ttt_phase_spec:none
+unique_blocks:8 effective_depth:16 depth_lora_rank:0
+hrc_depth_schedule_mode:prime_skip_superloop hrc_route_repeats:1 hrc_recursive_core_start:3 hrc_superloop_skip_schedule:0,1 hrc_council_mode:none hrc_council_train_mode:always hrc_council_depth_offsets:default hrc_council_conf_scale_init:1.0 hrc_council_hard_gate:0 hrc_council_entropy_threshold:6.0 hrc_council_entropy_sharpness:8.0 hrc_council_sanitize:0 hrc_council_logit_clamp:0.0 hrc_council_debug_nonfinite:0 hrc_dynamic_council_enabled:0 hrc_dynamic_council_threshold:6.0 hrc_dynamic_council_sharpness:8.0 hrc_dynamic_council_min_gate:0.01 rlm_memory_enabled:0 rlm_memory_train_enabled:1 rlm_memory_decay:0.9 rlm_memory_scale_init:0.02 rlm_memory_inject:input rlm_memory_update:hidden_mean rlm_memory_reset_each_eval:1 hrc_base_peer_mode:none hrc_pass_embed_enabled:1 hrc_pass_embed_mode:block_peer hrc_pass_role_mode:phase5 hrc_route_phase_enabled:1 hrc_mirror_mode:signperm hrc_depth_adapter_tie_mode:block hrc_recur_inject_enabled:1 hrc_recur_inject_log_a_init:0.0 hrc_recur_inject_log_b_init:-2.0 hrc_frozen_carry_enabled:0 hrc_frozen_carry_blocks:none hrc_frozen_carry_detach:1 hrc_cycle_fuse_enabled:0 hrc_cycle_fuse_inject_mode:repeat_phase hrc_cycle_fuse_taps:auto hrc_cycle_fuse_init_std:0.02 hrc_attn_only_blocks:none hrc_mlp_only_blocks:4,5,6,7
+virtual_block_schedule:0,1,2,3,4,5,6,7,3,5,7,4,6,2,1,0 virtual_block_repeats:0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1 virtual_mirror_layers:0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1
+shared_parallel_flags:0,0,0,0,0,0,1,1
+shared_branch_modes:full,full,full,full,mlp_only,mlp_only,mlp_only,mlp_only
+peer_modes:none peer_depth_limits:16
+virtual_route_phases:0,0,0,1,1,1,1,1,2,2,2,2,2,0,0,0 virtual_route_phase_positions:0,1,2,0,1,2,3,4,0,1,2,3,4,0,1,2 virtual_route_skip_ids:-1,-1,-1,0,0,0,0,0,1,1,1,1,1,-1,-1,-1 virtual_route_skip_hops:0,0,0,1,1,1,1,1,2,2,2,2,2,0,0,0
+superloop_shell_width:3 superloop_prime_width:5 superloop_skip_ids:0,1
+pass_role_schedule:0,1,1,1,1,1,1,2,2,3,3,3,3,3,3,4 pass_embed_schedule:0,1,2,3,4,5,6,7,3,5,7,4,6,2,1,0
+hrc_loop_index_enabled:1 hrc_loop_index_dim_requested:64 hrc_loop_index_dim_effective:64 hrc_loop_index_scale_init:0.02
+mtp_enabled:False t2(start=4000,ramp=2000,w=0.1) t3(start=7000,ramp=2500,w=0.05)
+tie_embeddings:True embed_lr:0.002 factored_embed_dim:768 head_lr:0.0 matrix_lr:0.0016 scalar_lr:0.0016
+logit_softcap:12 asym_logit_rescale:0
+train_ternary_blocks:0 train_ternary_group_size:64 train_ternary_scale_stat:mean train_ternary_param_dtype:fp32 train_casted_linear_param_dtype:fp32 train_quant_forward:1 train_quant_embeddings:1 train_quant_linear_count:26 train_quant_ternary_count:0 train_quant_skipped_small:6 train_ternary_packed_kernel:0 train_ternary_dense_kernel:0 keep_control_params_fp32:1 train_ternary_forward_cache:1 train_fused_qkv:1 bitnet_v2_hadamard:0 ternary_linear_count:0 fused_qkv_count:4
+train_batch_tokens:32768 train_seq_len:1024 iterations:1 warmup_steps:0 max_wallclock_seconds:45.000
+bpb_weighted_loss:0
+loss_fp32:1 loss_token_stride:1 loss_token_random_offset:1 loss_vocab_sample_size:0 loss_vocab_sample_correction:1
+lr_warmup_iters:0 lr_warmdown_style:cosine warmdown_iters:1 lr_min_scale:0.1
+microbatch_tokens:32768 microbatch_seqs:32
+quant_policy:default_bits=8 bits_overrides=none int8_promote=tok_emb.weight,lm_head.weight,embed_proj force_quant=vocab_moe.token_prior.weight,vocab_moe.down,vocab_moe.up ternary=none ternary_exclude=tok_emb.weight,lm_head.weight,embed_proj ternary_group=64 ternary_scale_stat=mean ternary_threshold=0.7 ternary_shrinkage_fix=1 lqer=1:10:20:4:asym1g64 lqer_include=blocks.,embed_proj lqer_exclude=tok_emb.weight,lm_head.weight,token_smear,attn_gate_w,attn_out_gate,vocab_moe,dual_stream codec=lzma codec_level=9 submission_cap=16000000
+seed:1337
+step:1/1 train_loss:9.0157 train_time:658ms step_avg:657.80ms
+step:1/1 val_loss:8.7386 val_bpb:3.9224 train_time:722ms step_avg:722.49ms
+peak memory allocated: 15564 MiB reserved: 16754 MiB
+Serialized model: skipped raw checkpoint SAVE_RAW_MODEL=0
+Code size: 334602 bytes
+Total submission size: 334602 bytes
+Serialized model int8/lqer20+lzma: 5865764 bytes (payload:24776988 raw_torch:24831569 payload_ratio:3.91x)
+export_payload_breakdown linear_by_bits:8:24256320 linear_payload:24256320 ternary_payload:0 lqer_payload:332160 passthrough_payload:188508
+Total submission size int8/lqer20+lzma: 6200366 bytes
+submission_cap:16000000 size:6200366 headroom:9799634 status:ok
+final_export_roundtrip val_loss:8.7540 val_bpb:3.9294 eval_time:16ms
+final_export_roundtrip_exact val_loss:8.75404930 val_bpb:3.92936716
+final_int8_zlib_roundtrip val_loss:8.7540 val_bpb:3.9294 legacy_alias:final_export_roundtrip codec:lzma
+final_int8_zlib_roundtrip_exact val_loss:8.75404930 val_bpb:3.92936716 legacy_alias:final_export_roundtrip_exact

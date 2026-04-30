@@ -1,0 +1,2 @@
+candidate,returncode,artifact_total_bytes,artifact_headroom,decision,reason
+break_precision_width_q16q8q8_d704e704_fixed,0,10555354,5444646,run_full,cap_safe

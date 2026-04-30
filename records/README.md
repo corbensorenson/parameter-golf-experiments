@@ -24,13 +24,16 @@ Start here when coming back to the project:
 3. `./h100_speed_audit_20260430.md`
    - Current paid RunPod/H100 ledger, including live/queued jobs, corrected
      H100 speed settings, cap problems, and the latest cloud results.
-4. `../levers.md`
+4. `./h100_breakcliff_results_20260430.md`
+   - Latest 1xH100 architecture scout. Prime-skip HRC is the new best
+     architecture signal and has the cleanest next-step headroom.
+5. `../levers.md`
    - Full lever catalog: quality, speed, size, tokenizer, legality, and systems
      knobs explored so far.
-5. `./experiment_synthesis_20260426.md`
+6. `./experiment_synthesis_20260426.md`
    - Older but still useful synthesis across sub-4, sub-16, tokenizer, and
      systems work.
-6. `./overnight_synthesis_20260427.md`
+7. `./overnight_synthesis_20260427.md`
    - Close-out of council/RLM, spike VocabMoE, sub-4 soft-size, cap-speed, and
      top-2 promotion runs.
 
@@ -59,10 +62,15 @@ Important current results:
 - Over-cap H100 result:
   `h100_hrc_dual_i3l5r2_d768e2560_q8_coremlp_left320_embedq` reached `1.4894`
   BPB at `224.03ms/step`, but exported to `22,584,399` bytes.
-- Current cap-legal H100 follow-up:
-  three trimmed candidates are running through a proxy-first matrix. The best
-  proxy row will be rerun with final artifact export. See
-  `h100_speed_audit_20260430.md`.
+- Best legal 8xH100 evidence:
+  `final8x_legal_196k_r2_d704e768_w2200_wd02_lqer6t12_vocabmoe_qk55`
+  reached `1.35496419` BPB at `90.13ms/step`, with `15,989,749` bytes. This is
+  the best official-shaped self-funded evidence, but the 8x run bought only a
+  tiny final-BPB improvement over the 1x rows.
+- New best 1xH100 architecture signal:
+  `break_prime_skip_superloop_d640e768` reached `1.35504224` BPB at
+  `107.87ms/step`, with `14,051,162` bytes. It beats the pod control, has
+  almost `1.95MB` headroom, and should be the next H100 cap-spend anchor.
 - Best under/around-8MB local evidence:
   q6 HRC/VocabMoE rows around `6.2MB` reached about `1.87` BPB locally. That
   lane is better than the ternary IO-tail lane when quality matters more than
@@ -74,6 +82,11 @@ Important current results:
   - Live source of truth for H100 speed, status, and results.
   - Includes the corrected 1xH100 batch policy, cap-legal follow-up, sub-4 H100
     probe, and known cap/export issues.
+- `h100_breakcliff_results_20260430.md`
+  - Two-hour 1xH100 architecture scout after the 8x plateau.
+  - Promotes prime-skip HRC as the next clean novel route and demotes heavier
+    LexLoRE, bigram side features, all-core attention, and the tested
+    train-time q16/q8/q8 width ladder.
 - `h100_novel_contender_plan_20260429.md`
   - Paid-cloud candidate plan from before the first H100 runs.
   - Useful for intent, but superseded by the speed audit for actual results.
@@ -169,6 +182,9 @@ When reading older docs, watch for these traps:
   final H100 exports around `22.6-23.7MB`.
 - Any "strict sub-4" claim before train-time embedding quantization should be
   checked against the later H100 around-4 result.
+- Any claim that the best 1xH100 route is the plain batch32k r2 spine is
+  superseded by the prime-skip break-cliff row at `1.35504224` BPB and
+  `14,051,162` bytes.
 - Early H100 smoke results accidentally used baseline model routing before
   `MODEL_FAMILY=hrc` was forced in HRC helpers.
 - Local wall-clock comparisons from periods where the desktop was used for

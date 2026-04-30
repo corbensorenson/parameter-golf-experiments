@@ -1,0 +1,11 @@
+candidate,returncode,artifact_total_bytes,artifact_headroom,decision,reason
+break_best32k_d704e832_control,0,7218870,8781130,run_full,cap_safe
+break_lexlore_exit_rank4_warm_d704e768,0,7120622,8879378,run_full,cap_safe
+break_lexlore_spike32_top4_exit_d704e768,0,7086194,8913806,run_full,cap_safe
+break_coreattn2_d704e768,0,7234694,8765306,run_full,cap_safe
+break_coreattn_all_d640e768,0,7071462,8928538,run_full,cap_safe
+break_i3l7r2_unique_loop_d640e768,0,6938142,9061858,run_full,cap_safe
+break_partial_tail_cycle_lidx_d704e768,0,6991806,9008194,run_full,cap_safe
+break_prime_skip_superloop_d640e768,0,6200366,9799634,run_full,cap_safe
+break_precision_width_q16q8q8_d704e704,1,,,skip,failed_or_over_cap_or_missing_size
+break_bigram_sidefeat_d704e704,0,7013570,8986430,run_full,cap_safe

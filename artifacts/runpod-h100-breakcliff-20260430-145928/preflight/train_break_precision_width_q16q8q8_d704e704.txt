@@ -1,0 +1,81 @@
+logs/break_precision_width_q16q8q8_d704e704_20260430_200607.txt
+val_bpb:byte_sidecar tokenizer_kind=sentencepiece tokenizer_path=/workspace/parameter-golf-novel-8x-ready/upstream_records/records/track_10min_16mb/2026-04-18_PR1626_CaseOps_Taper/tokenizers/fineweb_8192_bpe_lossless_caps_caseops_v1_reserved.model
+train_loader:dataset:fineweb10B_sp8192_lossless_caps_caseops_v1_reserved train_shards:1
+val_loader:shards pattern=/workspace/parameter-golf-novel-8x-ready/upstream_records/records/track_10min_16mb/2026-04-18_PR1626_CaseOps_Taper/datasets/fineweb10B_sp8192_lossless_caps_caseops_v1_reserved/fineweb_val_*.bin tokens:4096
+WARNING: using VAL_TOKENS_LIMIT=4096 (effective_tokens:4096) for local proxy evaluation
+[rank0]: Traceback (most recent call last):
+[rank0]:   File "/workspace/parameter-golf-novel-8x-ready/train_gpt_arch_evolution.py", line 6815, in <module>
+[rank0]:     main()
+[rank0]:   File "/workspace/parameter-golf-novel-8x-ready/train_gpt_arch_evolution.py", line 5694, in main
+[rank0]:     base_model = GPT(
+[rank0]:                  ^^^^
+[rank0]:   File "/workspace/parameter-golf-novel-8x-ready/train_gpt_arch_evolution.py", line 4210, in __init__
+[rank0]:     raise ValueError(
+[rank0]: ValueError: layer_widths[0]=512 must be divisible by NUM_HEADS=11
+[rank0]:[W430 20:06:16.369393168 ProcessGroupNCCL.cpp:1524] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+E0430 20:06:17.076000 44302 torch/distributed/elastic/multiprocessing/api.py:882] failed (exitcode: 1) local_rank: 0 (pid: 44371) of binary: /usr/local/bin/python
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/usr/local/lib/python3.12/dist-packages/torch/distributed/run.py", line 940, in <module>
+    main()
+  File "/usr/local/lib/python3.12/dist-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 357, in wrapper
+    return f(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/torch/distributed/run.py", line 936, in main
+    run(args)
+  File "/usr/local/lib/python3.12/dist-packages/torch/distributed/run.py", line 927, in run
+    elastic_launch(
+  File "/usr/local/lib/python3.12/dist-packages/torch/distributed/launcher/api.py", line 156, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/torch/distributed/launcher/api.py", line 293, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+/workspace/parameter-golf-novel-8x-ready/train_gpt_arch_evolution.py FAILED
+------------------------------------------------------------
+Failures:
+  <NO_OTHER_FAILURES>
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2026-04-30_20:06:17
+  host      : 213354a35ea8
+  rank      : 0 (local_rank: 0)
+  exitcode  : 1 (pid: 44371)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================
+
+--- trainer logfile: /workspace/parameter-golf-novel-8x-ready/logs/break_precision_width_q16q8q8_d704e704_20260430_200607.txt ---
+====================================================================================================
+Running Python 3.12.3 (main, Nov  6 2025, 13:44:16) [GCC 13.3.0]
+Running PyTorch 2.9.1+cu128
+device:cuda name:NVIDIA H100 80GB HBM3 capability:9.0
+Thu Apr 30 20:06:14 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 580.126.09             Driver Version: 580.126.09     CUDA Version: 13.0     |
++-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA H100 80GB HBM3          On  |   00000000:3A:00.0 Off |                    0 |
+| N/A   33C    P0            110W /  700W |    1185MiB /  81559MiB |      0%      Default |
+|                                         |                        |             Disabled |
++-----------------------------------------+------------------------+----------------------+
+
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|    0   N/A  N/A           44371      C   /usr/local/bin/python                  1176MiB |
++-----------------------------------------------------------------------------------------+
+
+====================================================================================================
+val_bpb:byte_sidecar tokenizer_kind=sentencepiece tokenizer_path=/workspace/parameter-golf-novel-8x-ready/upstream_records/records/track_10min_16mb/2026-04-18_PR1626_CaseOps_Taper/tokenizers/fineweb_8192_bpe_lossless_caps_caseops_v1_reserved.model
+train_loader:dataset:fineweb10B_sp8192_lossless_caps_caseops_v1_reserved train_shards:1
+val_loader:shards pattern=/workspace/parameter-golf-novel-8x-ready/upstream_records/records/track_10min_16mb/2026-04-18_PR1626_CaseOps_Taper/datasets/fineweb10B_sp8192_lossless_caps_caseops_v1_reserved/fineweb_val_*.bin tokens:4096
+WARNING: using VAL_TOKENS_LIMIT=4096 (effective_tokens:4096) for local proxy evaluation

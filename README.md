@@ -74,7 +74,7 @@ candidate currently running, defer to `records/h100_speed_audit_20260430.md`.
 | 16MB frontier cap-fill | Selective public-leaderboard transfers on the current best `i3/l5/r5` q8 spine | Completed: Polar/MIN_LR is the new best at `1.5336` BPB; e640 rank spend is second at `1.5368`; LQER was a small repair at `1.5407`; QK+parres was negative at `1.5489` |
 | 16MB breakout matrix | Broad 5k scouts for getting out of the `1.5x` local band: dense SP8192-like controls, physical-depth spend, full-K/V attention, legal TTT, BigramHash, more unique loop blocks, and one dual-stream row | Stopped after the first dense rows failed/crashed and the project pivoted away from official-record chasing on local hardware |
 | 16MB non-record art showcase | Weird-but-auditable architecture exhibits for `records/track_non_record_16mb`: prime skip routes, mirrored IO tails, width/precision ladders, spike VocabMoE, RLM-lite memory, council distributions, and trained dual streams | Active in `records/cap16-art-showcase-2k-auto-20260429-173955`; six 2k smoke rows with final-export scoring and live 250-step logs. See `records/art_showcase_plan_20260429.md` |
-| H100 novel contender lane | Paid-cloud scaling read for our own MirrorLoop/LexLoRE family, not a vanilla leaderboard clone | Local preflight is prepared first in `cap16_h100_preflight`; paid 8xH100 runner is `scripts/run_h100_novel_matrix.py` |
+| H100 novel contender lane | Paid-cloud scaling read for our own MirrorLoop/LexLoRE family, not a vanilla leaderboard clone | Best legal 8x result: `1.35496419` BPB at `15,989,749` bytes. Best new 1x architecture signal: `break_prime_skip_superloop_d640e768`, `1.35504224` BPB, `107.87ms/step`, `14,051,162` bytes, with almost `1.95MB` headroom. |
 | 16MB leaderboard-blend lane | Ports public-leaderboard and prior-work tricks onto our MirrorLoop/LexLoRE spine | Focused scout and best-2 promotion completed; sparsegate, depth-LoRA, cycle-rev, d768/d896 width, and the fp16-param speed profile did not beat the d640/e256 anchor |
 | 16MB spike/self-election LexLoRE | Hard top-k token/expert election variants of LexLoRE/VocabMoE | Corrected spikehybrid is real and close: `1.8792` BPB, but still behind the dense input+loop-first anchor |
 | Tokenizer lane | Lossless CaseOps, word-boundary BPE/Unigram, vocab sweeps | Legal path is exact byte sidecars and reversible transforms, not lossy whole-word shortcuts |
@@ -101,6 +101,10 @@ priorities, not claim final scores.
 - `scripts/run_h100_novel_matrix.py` - H100/8xH100 launcher for the novel
   MirrorLoop/LexLoRE contenders using the real trainer instead of the RTX 2060
   wrapper.
+- `scripts/run_h100_breakcliff_matrix.py` - 1xH100 architecture scout for
+  escaping the `~1.35` exported-BPB plateau; includes prime-skip HRC, LexLoRE
+  exit/spike variants, core-attention probes, width/precision ladders, and
+  preflight export guards.
 - `scripts/bench_packed_ternary_linear.py` - benchmark harness for packed
   ternary linear experiments.
 - `scripts/check_cuda126_env.py` and `scripts/use_cuda126.ps1` - local CUDA
@@ -115,6 +119,8 @@ priorities, not claim final scores.
 - `records/*.md` - human-written experiment ledgers and current conclusions.
 - `records/h100_speed_audit_20260430.md` - live H100/RunPod speed, result, and
   queue ledger.
+- `records/h100_breakcliff_results_20260430.md` - latest H100 architecture
+  scout; prime-skip MirrorLoop/HRC is the current best 1xH100 route signal.
 - `records/experiment_synthesis_20260426.md` - compact read of the current
   state across sub-4, sub-16, tokenizer, and systems work.
 - `records/overnight_synthesis_20260427.md` - close-out of the overnight
