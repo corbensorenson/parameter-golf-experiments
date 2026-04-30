@@ -20,7 +20,7 @@ compact recurrent transformer family called **MirrorLoop Recurrent Core** with
 - Full experiment repo:
   https://github.com/corbensorenson/parameter-golf-experiments
 - Submission fork branch:
-  https://github.com/corbensorenson/parameter-golf/tree/codex/agent-b-harness
+  https://github.com/corbensorenson/parameter-golf/tree/nonrecord-mirrorloop-lexlore
 
 ## Main Preserved Result
 

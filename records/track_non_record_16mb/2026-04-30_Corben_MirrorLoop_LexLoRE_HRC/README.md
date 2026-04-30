@@ -3,7 +3,7 @@
 **Track:** non-record / art submission  
 **Author:** Corben Sorenson ([@corbensorenson](https://github.com/corbensorenson))  
 **Public experiment log:** [corbensorenson/parameter-golf-experiments](https://github.com/corbensorenson/parameter-golf-experiments)  
-**Submission branch:** [corbensorenson/parameter-golf, `codex/agent-b-harness`](https://github.com/corbensorenson/parameter-golf/tree/codex/agent-b-harness)
+**Submission branch:** [corbensorenson/parameter-golf, `nonrecord-mirrorloop-lexlore`](https://github.com/corbensorenson/parameter-golf/tree/nonrecord-mirrorloop-lexlore)
 
 ## Summary
 

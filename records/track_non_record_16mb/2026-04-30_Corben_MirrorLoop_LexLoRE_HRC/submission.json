@@ -10,6 +10,6 @@
   "hardware": "8xH100 RunPod self-funded late-window scout",
   "status": "non-record art submission; not claimed as SOTA or statistically significant official record",
   "experiment_repo": "https://github.com/corbensorenson/parameter-golf-experiments",
-  "submission_branch": "https://github.com/corbensorenson/parameter-golf/tree/codex/agent-b-harness",
+  "submission_branch": "https://github.com/corbensorenson/parameter-golf/tree/nonrecord-mirrorloop-lexlore",
   "notes": "Best preserved under-cap 8xH100 exported-reload result for the MirrorLoop Recurrent Core + LexLoRE family. Prime-skip MirrorLoop reached 1.35504224 BPB on 1xH100 and is documented as the strongest late architecture signal, not the main submitted 8x score."
 }

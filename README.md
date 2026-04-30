@@ -19,7 +19,7 @@ not an official SOTA claim.
 - Public experiment repository:
   <https://github.com/corbensorenson/parameter-golf-experiments>
 - Submission fork branch:
-  <https://github.com/corbensorenson/parameter-golf/tree/codex/agent-b-harness>
+  <https://github.com/corbensorenson/parameter-golf/tree/nonrecord-mirrorloop-lexlore>
 
 Best preserved under-cap 8xH100 evidence:
 
