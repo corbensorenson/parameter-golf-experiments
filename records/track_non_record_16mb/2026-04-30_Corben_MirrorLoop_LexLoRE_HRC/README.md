@@ -1,61 +1,105 @@
-# MirrorLoop HRC + LexLoRE
+# MirrorLoop Recurrent Core + LexLoRE
 
 **Track:** non-record / art submission  
 **Author:** Corben Sorenson ([@corbensorenson](https://github.com/corbensorenson))  
-**Status:** 1xH100 evidence now, intended 8xH100 follow-up if capacity becomes available before review.
+**Public experiment log:** [corbensorenson/parameter-golf-experiments](https://github.com/corbensorenson/parameter-golf-experiments)  
+**Submission branch:** [corbensorenson/parameter-golf, `codex/agent-b-harness`](https://github.com/corbensorenson/parameter-golf/tree/codex/agent-b-harness)
 
 ## Summary
 
-This submission explores a deliberately nonstandard small language model shape:
+This is an art-lane submission for a deliberately unusual compact language
+model family. The goal was not to clone the current accepted leaderboard stack.
+The goal was to test whether a transformer can spend parameters more
+aggressively by routing through a mirrored IO shell and a reused recurrent
+middle, while token-conditioned low-rank experts steer the lexical interface.
 
-- **MirrorLoop HRC:** a mirrored input/output shell around a recurrent middle:
-  `012 | 34567 | 34567 | 210`.
-- **LexLoRE:** token-conditioned low-rank lexical expert residual adapters at
-  the input and loop-entry sites.
-- **Train-time quantization from step 0:** the model is trained through the same
-  q8 quantized forward path used by the final artifact, including embeddings.
-- **Factored tied embeddings:** the token interface is widened without paying
-  the full dense `vocab x dim` cost.
-- **LQER:** low-rank quantization error repair is applied at export.
-- **One attention-capable core-entry block:** the recurrent core is otherwise
-  MLP-only for speed.
+The submitted family combines:
 
-The goal is not to clone the accepted leaderboard transformer stack. It is to
-test whether a mirrored recurrent core plus lexical low-rank steering can form a
-compact, auditable architecture family under the 16MB artifact constraint.
+- **MirrorLoop Recurrent Core:** an entry shell, reused recurrent middle, and
+  mirrored exit shell.
+- **LexLoRE:** Lexical Low-Rank Experts, a shared low-rank expert bank with
+  token-conditioned routing at `input` and `loop_first`.
+- **Export-honest quantization:** q8 train-time forward from step 0, including
+  tied embeddings, followed by final exported reload scoring.
+- **Factored tied embeddings:** a lower-rank SP8192 token interface so the
+  artifact can stay near the decimal 16MB cap.
+- **LQER:** low-rank quantization-error repair sidecars counted inside the
+  artifact.
+- **Attention concentrated at the core entry:** the shell and first recurrent
+  core block keep token mixing, while deeper recurrent core blocks are MLP-only
+  for speed.
+
+## Best Preserved Evidence
+
+The best preserved under-cap result is from a self-funded 8xH100 RunPod run.
+The run used the official-style 10-minute wall-clock budget, but it should
+still be treated as non-record evidence because the sweep was narrow and
+self-funded late in the challenge window.
+
+| Candidate | Final export BPB | Train-time val BPB | Steps | Step speed | Total bytes |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `final8x_legal_196k_r2_d704e768_w2200_wd02_lqer6t12_vocabmoe_qk55` | `1.35496419` | `1.3191` | `6658` | `90.13ms` | `15,989,749` |
+
+This is not presented as SOTA. It is presented as the cleanest preserved score
+for the MirrorLoop/LexLoRE family.
+
+The strongest preserved 1xH100 architecture signal came later from a
+prime-skip MirrorLoop route:
+
+| Candidate | Final export BPB | Steps | Step speed | Total bytes | Headroom |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `break_prime_skip_superloop_d640e768` | `1.35504224` | `5563` | `107.87ms` | `14,051,162` | `1,948,838` |
+
+That route was:
+
+```text
+012 | 34567 | 35746 | 210
+```
+
+It is not used as the main submitted score because it was only preserved on
+1xH100, but it is the most interesting late architecture finding: it improved
+quality and speed while leaving almost 2MB of artifact headroom.
 
 ## Architecture
 
-The core idea is to treat the transformer as an hourglass-like route rather
-than a flat list of layers. The first three blocks form a token-facing entry
-tail. Five semantic blocks then run as a recurrent middle. The exit path mirrors
-the entry tail:
+The ordinary HRC route used in the 8x preserved score is:
 
 ```text
 entry      loop pass 1       loop pass 2       mirrored exit
 0 1 2  ->  3 4 5 6 7   ->    3 4 5 6 7   ->   2 1 0
 ```
 
-Only block `3` keeps attention inside the loop. Blocks `4,5,6,7` are MLP-only
-in the recurrent core, which is a speed/quality tradeoff that worked better
-than fully-attentional recurrence in local and H100 sweeps. The route is
-conditioned with pass embeddings, loop index information, and small recurrent
-injection parameters so repeated blocks can learn different roles on different
-passes.
+The implementation stores only eight physical transformer blocks:
 
-LexLoRE is the token-facing control surface. It uses token-conditioned low-rank
-expert residuals with 16 experts and rank 2, shared across the selected sites
-with site-specific bias/scale. In the best current spine it is active at:
+- blocks `0,1,2`: token-facing IO shell;
+- blocks `3,4,5,6,7`: recurrent middle;
+- the exit tail reuses `2,1,0` with role conditioning.
+
+The recurrent middle is not simply repeated blindly. The route carries pass
+embeddings, loop-index information, and recurrent injection parameters so the
+same physical block can learn different virtual-depth roles.
+
+LexLoRE is placed at:
 
 ```text
 input, loop_first
 ```
 
-This means lexical experts advise both the initial read-in and the first entry
-to the recurrent semantic middle.
+The adapter is not a full per-token network. Each token owns a small learned
+router prior over shared low-rank expert bases:
 
-The submission intentionally trains on the quantized forward path from the
-first optimizer step:
+```text
+token_prior: vocab_size x num_experts
+down:        num_experts x rank x dim
+up:          num_experts x dim x rank
+```
+
+This gives token-specific steering while keeping the CUDA work batched and the
+artifact auditable.
+
+## Quantization And Scoring
+
+The training path uses the low-precision forward view from the first step:
 
 ```text
 TRAIN_QUANT_FORWARD=1
@@ -64,108 +108,94 @@ QUANT_WEIGHT_BITS=8
 VOCAB_MOE_TRAIN_QUANT_BITS=8
 ```
 
-That is important for the architecture: recurrence amplifies export-time
-quantization mismatch, so the model should learn under the precision regime it
-will actually be scored under. LQER is then used only as an export-time repair
-for the largest residual quantization errors.
+The score reported above is the final exported reload score, not the pre-export
+training model. This matters because several candidate families looked much
+better before export and then lost quality after compression.
 
-## Best Current Result
+## What Worked
 
-The best legal H100 result available before this PR was a 1xH100, 10-minute
-wall-clock run:
+- MirrorLoop/HRC produced a coherent and reproducible family of compact models.
+- LexLoRE at `input,loop_first` was the best lexical expert placement tested.
+- q8 train/export with train-time embedding quantization fixed an important
+  train/export mismatch.
+- Factored embeddings and LQER were necessary to get useful quality near 16MB.
+- 8xH100 used the hardware properly: the preserved legal row ran at about
+  `90ms/step` with all GPUs active.
+- Prime-skip recurrence was the strongest late architecture signal and is the
+  best next branch if this line is continued.
 
-| Candidate | BPB | Steps | Step speed | Total bytes |
-|---|---:|---:|---:|---:|
-| `h100_batch32k_d704e832_w2200_q8_coreattn1_lqer10t20_vocabmoe_qk55` | `1.35692129` | `5018` | `119.57 ms` | `15,658,145` |
+## Negative Findings
 
-This is below the decimal 16MB cap. It is **not** claimed as a record
-submission, and it has **not** yet been reproduced on the official 8xH100
-configuration. It is submitted here as a non-record/art lane result so the
-architecture and negative/positive findings are visible before the challenge
-deadline.
+The project is intentionally including the failed ideas because they are useful
+for review and future work:
 
-The raw RunPod pod used for the strongest 1xH100 queue became unavailable after
-the wallet ran out of funds, so `train.log` contains the preserved result notes
-from the project audit rather than the full raw stdout. If 8xH100 capacity
-becomes available, this PR should be updated with the raw 8x logs.
-
-## What We Learned
-
-The strongest result came from a 32k-token 1xH100 batch. A 24k row reached a
-slightly better BPB, but exceeded the decimal 16MB cap. A 16k row produced many
-more optimizer steps but worse BPB and a larger artifact. The useful signal is
-that this model has a real batch/update-rate sweet spot:
-
-| Batch row | BPB | Steps | Artifact | Read |
-|---|---:|---:|---:|---|
-| 32k | `1.35692129` | `5018` | `15,658,145` | best legal result |
-| 24k | `1.35552525` | `6235` | `16,292,969` | better raw score, over cap |
-| 16k | `1.36157540` | `8295` | `16,741,661` | more steps alone lost |
-
-Higher recurrence was also not automatically better. A 32k/r3 probe was legal
-but worse (`1.37374423` BPB), so the current best branch stays at r2 and spends
-bytes on the token interface and quantization repair instead of more repeated
-depth.
+- More recurrence was not automatically better. A legal r3 probe was worse
+  than the r2 spine.
+- Smaller batches gave more optimizer updates but did not beat the best legal
+  export score.
+- Exit-side/warm LexLoRE, sparse/self-election LexLoRE, and Bigram side
+  features did not improve the best H100 spine.
+- All-core attention was slower and worse; occasional token mixing helped more
+  than making every recurrent block attentional.
+- A train-time q16/q8/q8 precision-width ladder was implemented honestly, but
+  the tested H100 row was worse and over the cap.
+- The 8x run improved final BPB by only about `0.002` over the best 1x result,
+  so this family is not simply waiting for more GPUs; the architecture/export
+  gap is the bottleneck.
 
 ## Reproduction
 
-This record folder includes `train_gpt.py` and the small `ternary_golf` helper
-package imported by the trainer. The exact 1xH100 command is in
-`run_1xh100_best.sh`.
+This record folder includes:
+
+- `train_gpt.py`: self-contained trainer used by the submitted family;
+- `run_8xh100_best.sh`: preserved 8xH100 command for the best under-cap score;
+- `run_1xh100_best.sh`: preserved 1xH100 command for the earlier scout row;
+- `train.log`: compact score log and audit notes;
+- `train_8xh100_legal_best.log`: raw preserved stdout for the best 8x row;
+- `train_1xh100_prime_skip.log`: raw preserved stdout for the prime-skip
+  architecture signal;
+- `ternary_golf/`: small helper package imported by the trainer.
 
 Expected data/tokenizer:
 
 - `DATA_PATH`: CaseOps/SP8192 lossless dataset directory.
 - `TOKENIZER_PATH`: matching CaseOps/SP8192 SentencePiece model.
 
-Run:
+Run the preserved 8x command:
+
+```bash
+bash run_8xh100_best.sh
+```
+
+Run the earlier 1x command:
 
 ```bash
 bash run_1xh100_best.sh
 ```
 
-For an 8xH100 follow-up, keep the architecture constants and change only the
-distributed launch/batch schedule. The project repository contains a prepared
-`final8x` runner for that paid test.
+## Validity Notes
 
-## Planned 8xH100 Update
-
-The intended 8x update is not to broaden the search blindly. It should test the
-same architecture family under official-shaped distributed wall-clock runs:
-
-1. Preserve the best 24k-per-rank rhythm across 8 GPUs.
-2. Test a 32k-per-rank middle point.
-3. Test an official-style 524k global batch.
-4. Keep the r3 loop-index row as a single architecture sanity check.
-
-The PR should be updated with raw 8x logs only if an actual 8xH100 pod becomes
-available. Partial-H100 runs are intentionally not being substituted for the
-official-shaped result.
-
-## Notes On Validity
-
-This submission is intentionally conservative about claims:
-
-- It is under `track_non_record_16mb`.
-- It does not claim an 8xH100 official score.
-- It does not claim SOTA.
-- It reports the current best legal 1xH100 evidence and the intended 8x path.
-- It keeps the architecture self-contained and auditable.
+- This is a `track_non_record_16mb` submission.
+- It is not claiming SOTA.
+- It is not claiming that every ingredient is individually new.
+- It reports final exported reload BPB as the main metric.
+- It links the full experiment repository so reviewers can inspect the broader
+  search, including negative results and failed lanes.
 
 ## Why This Is Interesting
 
-Most ingredients have relatives in prior work: recurrence, adapters,
-quantization-aware training, factored embeddings, and low-rank repair. The art
-piece is the combination and the failure analysis:
+Most individual pieces have relatives in prior work: recurrence, low-rank
+adapters, MoE routing, train-time quantization, tied embeddings, and low-rank
+quant repair. The contribution here is the particular architecture package:
 
-1. A mirrored IO shell that returns through the same semantic ladder it entered.
-2. A looped middle that spends compute without spending many new parameters.
-3. Lexical low-rank experts that steer both token read-in and recurrent entry.
-4. Training on the quantized forward path from the first step rather than
-   quantizing only after training.
-5. Treating batch/update rate as part of the architecture search rather than a
-   separate systems detail.
+1. Mirror the token-facing shell instead of treating depth as a flat stack.
+2. Spend compute by looping the semantic middle without storing a full deeper
+   model.
+3. Use lexical low-rank expert steering at the read-in and loop-entry points.
+4. Train through the intended quantized forward path from step 0.
+5. Treat routing, precision, embedding rank, and export repair as one coupled
+   artifact budget.
 
-This is not presented as “recurrence beats the leaderboard transformer stack.”
-It is a compact record of what a mirrored recurrent/lexical-expert family can
-do, where it failed, and which pieces seemed to matter.
+The result is not a leaderboard-winning model. It is a strange, auditable model
+family with enough evidence to show what parts helped, what parts failed, and
+where the next branch should go.

@@ -280,32 +280,44 @@ MirrorLoop+LexLoRE spine.
 
 ## Current Best Read
 
-The current H100 evidence favors this spine:
+The preserved 8xH100 evidence favors this spine:
 
 ```text
 CaseOps/SP8192
 + MirrorLoop i3/l5/r2
-+ d704, factored embedding around e832
++ d704, factored embedding around e768
 + q8 train/export, train-quant embeddings enabled
 + one attention-capable core-entry block
 + LexLoRE input + loop-first
 + QK gain 5.5
-+ LQER around r10/t20
-+ small single-H100 batch around 24k-32k tokens
++ LQER around r6/t12
++ 196k global batch on 8xH100
 ```
 
-Best legal H100 row so far:
+Best preserved under-cap 8xH100 row:
 
 ```text
-h100_batch32k_d704e832_w2200_q8_coreattn1_lqer10t20_vocabmoe_qk55
-BPB: 1.35692129
-steps: 5018
-step speed: 119.57 ms
-artifact: 15,658,145 bytes
+final8x_legal_196k_r2_d704e768_w2200_wd02_lqer6t12_vocabmoe_qk55
+BPB: 1.35496419
+steps: 6658
+step speed: 90.13 ms
+artifact: 15,989,749 bytes
 ```
 
-A nearby 24k batch row reached `1.35552525` BPB but exported over the 16MB cap,
-so the active queue is trying to legalize that branch.
+The best late architecture signal was a prime-skip MirrorLoop route:
+
+```text
+break_prime_skip_superloop_d640e768
+route: 012 | 34567 | 35746 | 210
+BPB: 1.35504224
+steps: 5563
+step speed: 107.87 ms
+artifact: 14,051,162 bytes
+```
+
+That prime-skip row was preserved only on 1xH100, so it is not the main
+submitted 8x score. It is the best evidence for where the architecture should
+go next: route diversity helped more than simply adding repeated depth.
 
 ## What Is Actually Novel
 
@@ -326,14 +338,14 @@ For a non-record/art submission, that is the story to tell: a strange but
 auditable model family that is not trying to be a direct clone of the accepted
 leaderboard transformer stack.
 
-## Architecture Evolution Queue
+## Architecture Evolution Notes
 
-Added 2026-04-30 while the H100 export-fix queue was running:
+Added 2026-04-30 during the late H100 sweep:
 
 - `train_gpt_arch_evolution.py` is a cloned trainer for route experiments, so
   the current best-family `train_gpt.py` stays stable.
-- `scripts/run_h100_arch_evolution_matrix.py` runs six full 10-minute H100
-  probes after the current queue exits.
+- `scripts/run_h100_arch_evolution_matrix.py` and
+  `scripts/run_h100_breakcliff_matrix.py` run H100 route-evolution probes.
 - New cloned-only HRC route mode: `transition_tailN_cycle`. For the active
   probe, `N=3`, `io=3`, `loop=5`, and `repeats=2`, giving:
 
@@ -344,7 +356,7 @@ Added 2026-04-30 while the H100 export-fix queue was running:
 This is the partial-recurrence version of MirrorLoop: repeat the full semantic
 core twice, then refine only the deepest semantic tail before the mirrored exit.
 
-The queued probes test:
+The tested probes included:
 
 - LexLoRE at `input,loop_first,loop_last`.
 - Warmer LexLoRE with rank 4, prior noise, and larger initial scale.
@@ -353,6 +365,11 @@ The queued probes test:
 - ValueEmbedding at virtual layer 3 as token-conditioned value-side attention
   information.
 - Partial tail recurrence with loop index enabled.
+- Prime-skip recurrent routing, which was the only clear break-cliff win.
+
+The final submitted folder intentionally keeps the simpler reproduced
+MirrorLoop route as the main 8x score and documents prime-skip as follow-up
+architecture evidence.
 
 ## What Not To Claim
 

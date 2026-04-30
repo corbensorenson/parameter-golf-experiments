@@ -9,6 +9,33 @@ For the original challenge rules, leaderboard, and submission process, see the
 upstream repository:
 <https://github.com/openai/parameter-golf>
 
+## Submission Snapshot
+
+This project is now being presented as a **non-record / art-lane** submission,
+not an official SOTA claim.
+
+- Submission folder:
+  `records/track_non_record_16mb/2026-04-30_Corben_MirrorLoop_LexLoRE_HRC/`
+- Public experiment repository:
+  <https://github.com/corbensorenson/parameter-golf-experiments>
+- Submission fork branch:
+  <https://github.com/corbensorenson/parameter-golf/tree/codex/agent-b-harness>
+
+Best preserved under-cap 8xH100 evidence:
+
+| Candidate | Final export BPB | Steps | Step speed | Bytes |
+| --- | ---: | ---: | ---: | ---: |
+| `final8x_legal_196k_r2_d704e768_w2200_wd02_lqer6t12_vocabmoe_qk55` | `1.35496419` | `6658` | `90.13ms` | `15,989,749` |
+
+Best late architecture signal:
+
+| Candidate | Final export BPB | Steps | Step speed | Bytes |
+| --- | ---: | ---: | ---: | ---: |
+| `break_prime_skip_superloop_d640e768` | `1.35504224` | `5563` | `107.87ms` | `14,051,162` |
+
+The prime-skip row is documented as follow-up architecture evidence, not the
+main submitted 8x score.
+
 ## Documentation First
 
 The experiment notes are intentionally detailed, but they are no longer all

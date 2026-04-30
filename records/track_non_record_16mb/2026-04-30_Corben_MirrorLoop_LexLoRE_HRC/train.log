@@ -1,58 +1,76 @@
 Non-record/art submission log note
 =================================
 
-Best preserved legal 1xH100 result:
+Best preserved under-cap 8xH100 evidence:
 
-candidate: h100_batch32k_d704e832_w2200_q8_coreattn1_lqer10t20_vocabmoe_qk55
-final_export_val_bpb: 1.35692129
-steps: 5018
-step_avg: 119.57ms
-total_submission_bytes: 15658145
-cap_headroom_bytes: 341855
-hardware: 1xH100 RunPod scout
+candidate: final8x_legal_196k_r2_d704e768_w2200_wd02_lqer6t12_vocabmoe_qk55
+final_export_val_bpb: 1.35496419
+train_time_val_bpb: 1.3191
+steps: 6658
+step_avg: 90.13ms
+total_submission_bytes: 15989749
+cap_headroom_bytes: 10251
+hardware: 8xH100 RunPod, self-funded late-window scout
 wall_clock_seconds: 600
 
-The raw RunPod stdout for the strongest 1xH100 queue was not recovered after
-the pod became unavailable when funds ran out. This file preserves the result
-recorded in the project audit notes before submission. This is why the entry is
-submitted under track_non_record_16mb and not claimed as an official record.
+This is submitted under track_non_record_16mb. It is not claimed as SOTA and
+not claimed as a statistically significant official record. It is the best
+preserved exported-reload score for the MirrorLoop HRC + LexLoRE family.
 
-Relevant preserved audit excerpt:
+Relevant preserved 8x rows:
 
-- New best legal row:
-  h100_batch32k_d704e832_w2200_q8_coreattn1_lqer10t20_vocabmoe_qk55
-  Export BPB: 1.35692129
+- final8x_legal_196k_r2_d704e768_w2200_wd02_lqer6t12_vocabmoe_qk55
+  Final export BPB: 1.35496419
+  Train-time val BPB: 1.3191
+  Steps: 6658
+  Step speed: 90.13ms
+  Bytes: 15,989,749
+  Headroom: 10,251
+  Status: best preserved under-cap 8x evidence
+
+- final8x_legal_196k_r2_d704e768_w2200_wd02_lqer8t16_vocabmoe_qk55
+  Final export BPB: 1.35536174
+  Train-time val BPB: 1.3158
+  Steps: 6655
+  Step speed: 90.17ms
+  Bytes: 15,803,789
+  Headroom: 196,211
+  Status: legal but slightly worse after export
+
+- final8x_196k_r2_d704e832_w2200_wd02_lqer8t16_vocabmoe_qk55
+  Final export BPB: 1.35704747
+  Train-time val BPB: 1.3174
+  Steps: 6628
+  Step speed: 90.54ms
+  Bytes: 16,413,081
+  Status: over decimal 16MB cap
+
+Earlier preserved 1xH100 legal scout:
+
+- h100_batch32k_d704e832_w2200_q8_coreattn1_lqer10t20_vocabmoe_qk55
+  Final export BPB: 1.35692129
   Steps: 5018
   Step speed: 119.57ms
   Bytes: 15,658,145
   Headroom: 341,855
+  Status: best pre-8x legal 1x result
 
-- Batch-size sweep result:
-  h100_batch32k_d704e832_w2200_q8_coreattn1_lqer10t20_vocabmoe_qk55
-  Export BPB: 1.35692129
-  Steps: 5018
-  Step speed: 119.57ms
-  Bytes: 15,658,145
-  Headroom: 341,855
+Late break-cliff architecture signal:
 
-Nearby rows:
-
-- h100_batch24k_d704e832_w2200_q8_coreattn1_lqer10t20_vocabmoe_qk55
-  Export BPB: 1.35552525
-  Steps: 6235
-  Step speed: 96.24ms
-  Bytes: 16,292,969
-  Status: over decimal 16MB cap
-
-- h100_batch16k_d704e832_w2200_q8_coreattn1_lqer10t20_vocabmoe_qk55
-  Export BPB: 1.36157540
-  Steps: 8295
-  Step speed: 72.34ms
-  Bytes: 16,741,661
-  Status: over decimal 16MB cap
+- break_prime_skip_superloop_d640e768
+  Final export BPB: 1.35504224
+  Steps: 5563
+  Step speed: 107.87ms
+  Bytes: 14,051,162
+  Headroom: 1,948,838
+  Route: 012 | 34567 | 35746 | 210
+  Status: strongest late architecture signal; preserved only on 1xH100
 
 Interpretation:
 
-The 32k global batch on 1xH100 is the best preserved legal result. The 24k
-batch found a slightly better raw score but exceeded the cap, and 16k showed
-that more optimizer updates alone did not compensate for noisier training.
+The 8x run showed the model can use H100s efficiently, but it did not close the
+gap to the official baseline. The final export gap remained the binding issue:
+train-time validation was much better than final exported BPB. The clearest
+architecture improvement was prime-skip recurrent routing, which improved both
+quality and speed while leaving substantial artifact headroom, but it was not
+rerun on 8xH100 before the pod shut down.

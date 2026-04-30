@@ -21,19 +21,23 @@ Start here when coming back to the project:
    - Submission-facing explanation of MirrorLoop/HRC, LexLoRE/VocabMoE,
      train-time quantization, LQER, width ladders, dual-stream bridges, and
      what is actually novel.
-3. `./h100_speed_audit_20260430.md`
+3. `./track_non_record_16mb/2026-04-30_Corben_MirrorLoop_LexLoRE_HRC/README.md`
+   - Actual non-record/art submission README. This is the reviewer-facing
+     summary with the best preserved 8x result, links to the public experiment
+     repo, and honest negative findings.
+4. `./h100_speed_audit_20260430.md`
    - Current paid RunPod/H100 ledger, including live/queued jobs, corrected
      H100 speed settings, cap problems, and the latest cloud results.
-4. `./h100_breakcliff_results_20260430.md`
+5. `./h100_breakcliff_results_20260430.md`
    - Latest 1xH100 architecture scout. Prime-skip HRC is the new best
      architecture signal and has the cleanest next-step headroom.
-5. `../levers.md`
+6. `../levers.md`
    - Full lever catalog: quality, speed, size, tokenizer, legality, and systems
      knobs explored so far.
-6. `./experiment_synthesis_20260426.md`
+7. `./experiment_synthesis_20260426.md`
    - Older but still useful synthesis across sub-4, sub-16, tokenizer, and
      systems work.
-7. `./overnight_synthesis_20260427.md`
+8. `./overnight_synthesis_20260427.md`
    - Close-out of council/RLM, spike VocabMoE, sub-4 soft-size, cap-speed, and
      top-2 promotion runs.
 
@@ -55,6 +59,11 @@ The strongest current ideas are:
 
 Important current results:
 
+- Current non-record/art submission evidence:
+  `final8x_legal_196k_r2_d704e768_w2200_wd02_lqer6t12_vocabmoe_qk55`
+  reached `1.35496419` BPB at `90.13ms/step`, with `15,989,749` bytes on a
+  self-funded 8xH100 RunPod scout. This is the main preserved score in the
+  submission folder.
 - Around-4MB H100 result:
   `i3l3r3_d768e256_q884_coret_lqer_r6t12` reached `2.1052` BPB at
   `84.14ms/step`, but exported to `4,238,717` bytes, so it is an around-4MB
@@ -62,11 +71,6 @@ Important current results:
 - Over-cap H100 result:
   `h100_hrc_dual_i3l5r2_d768e2560_q8_coremlp_left320_embedq` reached `1.4894`
   BPB at `224.03ms/step`, but exported to `22,584,399` bytes.
-- Best legal 8xH100 evidence:
-  `final8x_legal_196k_r2_d704e768_w2200_wd02_lqer6t12_vocabmoe_qk55`
-  reached `1.35496419` BPB at `90.13ms/step`, with `15,989,749` bytes. This is
-  the best official-shaped self-funded evidence, but the 8x run bought only a
-  tiny final-BPB improvement over the 1x rows.
 - New best 1xH100 architecture signal:
   `break_prime_skip_superloop_d640e768` reached `1.35504224` BPB at
   `107.87ms/step`, with `14,051,162` bytes. It beats the pod control, has
