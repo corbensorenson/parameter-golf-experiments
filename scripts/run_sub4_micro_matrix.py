@@ -14,7 +14,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PYTHON = ROOT / ".venv-cuda313" / "Scripts" / "python.exe"
+LOCAL_VENV_PYTHON = ROOT / ".venv-cuda313" / "Scripts" / "python.exe"
+PYTHON = LOCAL_VENV_PYTHON if LOCAL_VENV_PYTHON.exists() else Path(sys.executable)
 _MSVC_ENV_CACHE: dict[str, str] | None = None
 
 DEFAULT_PROFILES = [
@@ -119,6 +120,8 @@ def msvc_build_env() -> dict[str, str]:
 
 def configure_env() -> dict[str, str]:
     env = os.environ.copy()
+    if os.name != "nt":
+        return env
     env.update(msvc_build_env())
     venv_scripts = PYTHON.parent
     cuda_home = Path(r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6")

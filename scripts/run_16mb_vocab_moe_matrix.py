@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import argparse
 import os
+import queue
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -90,18 +92,74 @@ def quant_bits(*pairs: tuple[int, int]) -> str:
     return ",".join(f"blocks.{idx}.:{bits}" for idx, bits in pairs)
 
 
-CAP16_SPEED_COMMON: dict[str, str] = {
-    **SUB16_PORTED_FAST_LOOP,
-    # Make the low-precision path truthful from the first forward pass while
-    # avoiding needless fp32 parameter casts on the heavy linear modules.
+CAP16_STABLE_SPEED_COMMON: dict[str, str] = {
+    "PARAM_DTYPE": "fp32",
+    "USE_GRAD_SCALER": "1",
+    "MUON_DTYPE": "fp32",
+    "LOSS_FP32": "1",
+    "POST_STEP_ZERO_GRAD": "1",
     "TRAIN_CASTED_LINEAR_PARAM_DTYPE": "model",
     "TRAIN_TERNARY_PARAM_DTYPE": "model",
     "KEEP_CONTROL_PARAMS_FP32": "1",
     "TRAIN_FUSED_QKV": "1",
+    "GRAD_ACCUM_STEPS": "4",
+    # Final export roundtrip is the score that matters for these triage rows.
+    # Periodic validation was useful while debugging, but it now costs walltime.
+    "VAL_LOSS_EVERY": "0",
+    "TRAIN_LOG_EVERY": "250",
+}
+
+
+CAP16_SPEED_COMMON: dict[str, str] = {
+    # Make the low-precision path truthful from the first forward pass while
+    # keeping the optimizer numerics on the stability-safe 2060 path. The
+    # fully fp16-param/no-scaler experiment was faster, but collapsed exported
+    # BPB to ~4.15, so future rows use the stable dtype path and only retain
+    # speed levers that have not broken quality.
+    **CAP16_STABLE_SPEED_COMMON,
     "QK_GAIN_INIT": "5.25",
     "LQER_RANK": "12",
     "LQER_TOP_K": "24",
 }
+
+
+def cap16_clean_base(
+    *,
+    model_dim: int = 640,
+    embed_dim: int = 256,
+    io_width: int = 3,
+    loop_width: int = 3,
+    repeats: int = 3,
+) -> dict[str, str]:
+    if model_dim % 64 != 0:
+        raise ValueError(f"model_dim must keep 64-wide heads, got {model_dim}")
+    return {
+        **BASE_16MB,
+        **CAP16_STABLE_SPEED_COMMON,
+        **plain_loop_route(io_width, loop_width, repeats),
+        "MODEL_DIM": str(model_dim),
+        "NUM_HEADS": str(model_dim // 64),
+        "FACTORED_EMBED_DIM": str(embed_dim),
+    }
+
+
+def cap16_nospeed_base(
+    *,
+    model_dim: int = 640,
+    embed_dim: int = 256,
+    io_width: int = 3,
+    loop_width: int = 3,
+    repeats: int = 3,
+) -> dict[str, str]:
+    if model_dim % 64 != 0:
+        raise ValueError(f"model_dim must keep 64-wide heads, got {model_dim}")
+    return {
+        **BASE_16MB,
+        **plain_loop_route(io_width, loop_width, repeats),
+        "MODEL_DIM": str(model_dim),
+        "NUM_HEADS": str(model_dim // 64),
+        "FACTORED_EMBED_DIM": str(embed_dim),
+    }
 
 
 def cap16_speed_base(
@@ -124,11 +182,70 @@ def cap16_speed_base(
     }
 
 
+def cap16_baseline_base(
+    *,
+    model_dim: int = 512,
+    embed_dim: int = 384,
+    num_layers: int = 11,
+    num_kv_heads: int = 1,
+) -> dict[str, str]:
+    """Dense transformer branch for testing whether HRC is the bottleneck."""
+    if model_dim % 64 != 0:
+        raise ValueError(f"model_dim must keep 64-wide heads, got {model_dim}")
+    num_heads = model_dim // 64
+    if num_heads % max(num_kv_heads, 1) != 0:
+        raise ValueError(f"num_kv_heads={num_kv_heads} must divide num_heads={num_heads}")
+    return {
+        **BASE_16MB,
+        **CAP16_STABLE_SPEED_COMMON,
+        "MODEL_FAMILY": "baseline",
+        "NUM_LAYERS": str(num_layers),
+        "MODEL_DIM": str(model_dim),
+        "NUM_HEADS": str(num_heads),
+        "NUM_KV_HEADS": str(num_kv_heads),
+        "FACTORED_EMBED_DIM": str(embed_dim),
+        # HRC defaults leak in through the local 2060 launcher; keep the dense
+        # branch clean unless a row explicitly asks for a routing trick.
+        "PARALLEL_RESIDUAL_LAST_N": "0",
+        "RESIDUAL_MIXER_ENABLED": "0",
+        "HRC_LOOP_INDEX_ENABLED": "0",
+        "HRC_PASS_EMBED_ENABLED": "0",
+        "HRC_RECUR_INJECT_ENABLED": "0",
+        "HRC_ROUTE_PHASE_ENABLED": "0",
+        "DEPTH_LORA_RANK": "0",
+    }
+
+
+def prime_superloop_route(
+    *,
+    shell_width: int,
+    prime_width: int,
+    laps_per_skip: int,
+    skip_ids: tuple[int, ...] = (1,),
+) -> dict[str, str]:
+    """Prime-width HRC route that walks the recurrent ring by skip programs."""
+    if prime_width < 3:
+        raise ValueError("prime_width must be >= 3")
+    unique_blocks = int(shell_width) + int(prime_width)
+    effective_depth = 2 * int(shell_width) + int(prime_width) * max(int(laps_per_skip), 1) * len(skip_ids)
+    return {
+        "MODEL_FAMILY": "hrc",
+        "NUM_UNIQUE_BLOCKS": str(unique_blocks),
+        "EFFECTIVE_DEPTH": str(effective_depth),
+        "HRC_RECURSIVE_CORE_START": str(shell_width),
+        "HRC_ROUTE_REPEATS": str(max(int(laps_per_skip), 1)),
+        "HRC_DEPTH_SCHEDULE_MODE": "prime_skip_superloop",
+        "HRC_SUPERLOOP_SKIP_SCHEDULE": ",".join(str(skip_id) for skip_id in skip_ids),
+        "HRC_ROUTE_PHASE_ENABLED": "1",
+    }
+
+
 def palindrome_loop_route(io_width: int, loop_width: int, loop_repeats: int) -> dict[str, str]:
     """Build entry-tail + cycle-rev recurrent middle + mirrored-exit route settings."""
     core_depth = (2 * loop_width - 1) + max(loop_repeats - 1, 0) * (2 * loop_width - 2)
     effective_depth = io_width + core_depth + io_width
     return {
+        "MODEL_FAMILY": "hrc",
         "NUM_UNIQUE_BLOCKS": str(io_width + loop_width),
         "EFFECTIVE_DEPTH": str(effective_depth),
         "HRC_RECURSIVE_CORE_START": str(io_width),
@@ -191,6 +308,31 @@ def cap16_lqer_env(rank: int, top_k: int) -> dict[str, str]:
             "tok_emb.weight,lm_head.weight,token_smear,attn_gate_w,attn_out_gate,"
             "vocab_moe,dual_stream"
         ),
+    }
+
+
+def q8_train_export_env() -> dict[str, str]:
+    return {
+        "QUANT_WEIGHT_BITS": "8",
+        "VOCAB_MOE_TRAIN_QUANT_BITS": "8",
+        "QUANT_INT8_PROMOTE_PATTERNS": "tok_emb.weight,lm_head.weight,embed_proj",
+    }
+
+
+FINAL_ONLY_EVAL_ENV: dict[str, str] = {
+    # Promotion is based on the exported artifact roundtrip. Skipping periodic
+    # validation saves local wall time without changing training updates.
+    "VAL_LOSS_EVERY": "0",
+    "TRAIN_LOG_EVERY": "250",
+}
+
+
+def q8_core_io_ladder_env(io_bits: tuple[int, ...] = (16, 8, 4)) -> dict[str, str]:
+    return {
+        **q8_train_export_env(),
+        # Keep the proven q8 recurrent core and token interface, but train the
+        # mirrored IO-tail ladder from the first forward pass.
+        "QUANT_BITS_OVERRIDES": quant_bits(*[(idx, bits) for idx, bits in enumerate(io_bits)]),
     }
 
 
@@ -900,6 +1042,890 @@ CAP16_MAINLINE_CANDIDATES: list[dict[str, Any]] = [
 ]
 
 
+CAP16_ANCHOR_SPEND_CANDIDATES: list[dict[str, Any]] = [
+    {
+        "name": "anchor_i3l3r3_d640e256_q6_control",
+        "env": {
+            **BASE_16MB,
+            **BEST_CLEAN_VOCABMOE,
+        },
+        "notes": "fresh same-night control for the current best dense VocabMoE anchor",
+    },
+    {
+        "name": "anchor_i3l3r3_d640e256_q6_qk525_lqer16t32",
+        "env": {
+            **cap16_speed_base(model_dim=640, embed_dim=256),
+            **cap16_lqer_env(16, 32),
+            **BEST_CLEAN_VOCABMOE,
+        },
+        "notes": "lowest-risk upgrade: current anchor plus QK 5.25 and stronger LQER",
+    },
+    {
+        "name": "anchor_i3l3r3_d640e384_q6_qk525_lqer24t48",
+        "env": {
+            **cap16_speed_base(model_dim=640, embed_dim=384),
+            **cap16_lqer_env(24, 48),
+            **BEST_CLEAN_VOCABMOE,
+        },
+        "notes": "spends bytes on the token interface and more quant-error repair without widening residual blocks",
+    },
+    {
+        "name": "anchor_i3l3r3_d640e512_q8_qk525_lqer24t48",
+        "env": {
+            **cap16_speed_base(model_dim=640, embed_dim=512),
+            **cap16_lqer_env(24, 48),
+            **BEST_CLEAN_VOCABMOE,
+            **q8_train_export_env(),
+        },
+        "notes": "quality-first cap-fill row: richer factored embeddings plus train-time q8 instead of q6",
+    },
+    {
+        "name": "anchor_i3l3r3_d704e320_q6_qk525_lqer16t32",
+        "env": {
+            **cap16_speed_base(model_dim=704, embed_dim=320),
+            **cap16_lqer_env(16, 32),
+            **BEST_CLEAN_VOCABMOE,
+        },
+        "notes": "moderate residual-width spend between d640 and the d768 rows that overpaid locally",
+    },
+    {
+        "name": "anchor_i3l3r3_d704e384_q8_qk525_lqer24t48",
+        "env": {
+            **cap16_speed_base(model_dim=704, embed_dim=384),
+            **cap16_lqer_env(24, 48),
+            **BEST_CLEAN_VOCABMOE,
+            **q8_train_export_env(),
+        },
+        "notes": "closer-to-16MB quality row: moderate width, richer embedding rank, q8 train/export, and stronger LQER",
+    },
+    {
+        "name": "anchor_i3l3r3_d640e256_q6_vocabmoe_k16r4_qk525_lqer16t32",
+        "env": {
+            **cap16_speed_base(model_dim=640, embed_dim=256),
+            **cap16_lqer_env(16, 32),
+            **vocab_moe_env(experts=16, rank=4, mode="hybrid", layers="input,loop_first"),
+        },
+        "notes": "spends bytes inside the winning VocabMoE placement by doubling expert rank",
+    },
+    {
+        "name": "anchor_i3l3r3_d640e256_q6_vocabmoe_k32r2_qk525_lqer16t32",
+        "env": {
+            **cap16_speed_base(model_dim=640, embed_dim=256),
+            **cap16_lqer_env(16, 32),
+            **vocab_moe_env(experts=32, rank=2, mode="hybrid", layers="input,loop_first"),
+        },
+        "notes": "spends bytes on more token/expert buckets while preserving the proven rank-2 basis size",
+    },
+    {
+        "name": "anchor_i3l5r2_d640e256_q6_qk525_lqer16t32",
+        "env": {
+            **cap16_speed_base(model_dim=640, embed_dim=256, io_width=3, loop_width=5, repeats=2),
+            **cap16_lqer_env(16, 32),
+            **BEST_CLEAN_VOCABMOE,
+        },
+        "notes": "tests whether the i3/l5/r2 near-miss was loop diversity rather than d768 width",
+    },
+    {
+        "name": "anchor_i3l3r3_d640e256_q6_spikehybrid_top2_t15_qk525_lqer16t32",
+        "env": {
+            **cap16_speed_base(model_dim=640, embed_dim=256),
+            **cap16_lqer_env(16, 32),
+            **spike_vocab_moe_env(
+                experts=16,
+                rank=2,
+                mode="spike_hybrid",
+                layers="input,loop_first",
+                spike_top_k=2,
+                temperature=1.5,
+            ),
+        },
+        "notes": "targeted follow-up to the 1.8792 spikehybrid near-miss with softer self-election logits",
+    },
+]
+
+
+CAP16_ANCHOR_CLEAN_SPEND_CANDIDATES: list[dict[str, Any]] = [
+    {
+        "name": "clean_i3l3r3_d640e256_q6_control_speed",
+        "env": {
+            **cap16_clean_base(model_dim=640, embed_dim=256),
+            **BEST_CLEAN_VOCABMOE,
+        },
+        "notes": "same anchor recipe with only stable speed levers added; no QK 5.25 or heavier LQER",
+    },
+    {
+        "name": "clean_i3l3r3_d640e384_q6",
+        "env": {
+            **cap16_clean_base(model_dim=640, embed_dim=384),
+            **BEST_CLEAN_VOCABMOE,
+        },
+        "notes": "spends bytes on factored embedding rank while keeping q6 and the proven QK/LQER settings",
+    },
+    {
+        "name": "clean_i3l3r3_d640e512_q8",
+        "env": {
+            **cap16_clean_base(model_dim=640, embed_dim=512),
+            **BEST_CLEAN_VOCABMOE,
+            **q8_train_export_env(),
+        },
+        "notes": "cap-fill token-interface row: larger factored embedding and q8 train/export without QK/LQER confound",
+    },
+    {
+        "name": "clean_i3l3r3_d704e320_q6",
+        "env": {
+            **cap16_clean_base(model_dim=704, embed_dim=320),
+            **BEST_CLEAN_VOCABMOE,
+        },
+        "notes": "moderate residual-width spend between d640 and the d768 rows that overpaid locally",
+    },
+    {
+        "name": "clean_i3l3r3_d704e384_q8",
+        "env": {
+            **cap16_clean_base(model_dim=704, embed_dim=384),
+            **BEST_CLEAN_VOCABMOE,
+            **q8_train_export_env(),
+        },
+        "notes": "closer-to-cap quality row with moderate width, richer embedding rank, and q8 train/export",
+    },
+    {
+        "name": "clean_i3l3r3_d640e256_q6_vocabmoe_k16r4",
+        "env": {
+            **cap16_clean_base(model_dim=640, embed_dim=256),
+            **vocab_moe_env(experts=16, rank=4, mode="hybrid", layers="input,loop_first"),
+        },
+        "notes": "spends bytes inside the winning VocabMoE placement by doubling expert rank",
+    },
+    {
+        "name": "clean_i3l3r3_d640e256_q6_vocabmoe_k32r2",
+        "env": {
+            **cap16_clean_base(model_dim=640, embed_dim=256),
+            **vocab_moe_env(experts=32, rank=2, mode="hybrid", layers="input,loop_first"),
+        },
+        "notes": "spends bytes on more token/expert buckets while preserving rank-2 experts",
+    },
+    {
+        "name": "clean_i3l5r2_d640e256_q6",
+        "env": {
+            **cap16_clean_base(model_dim=640, embed_dim=256, io_width=3, loop_width=5, repeats=2),
+            **BEST_CLEAN_VOCABMOE,
+        },
+        "notes": "tests whether i3/l5/r2 loop diversity helps without the d768/QK/LQER confounds",
+    },
+]
+
+
+CAP16_ANCHOR_NOSPEED_SPEND_CANDIDATES: list[dict[str, Any]] = [
+    {
+        "name": "nospeed_i3l3r3_d640e256_q6_control",
+        "env": {
+            **cap16_nospeed_base(model_dim=640, embed_dim=256),
+            **BEST_CLEAN_VOCABMOE,
+        },
+        "notes": "fresh export-honest anchor control without fused-QKV/casted-linear speed shortcuts",
+    },
+    {
+        "name": "nospeed_i3l3r3_d640e384_q6",
+        "env": {
+            **cap16_nospeed_base(model_dim=640, embed_dim=384),
+            **BEST_CLEAN_VOCABMOE,
+        },
+        "notes": "spend bytes on factored embedding rank while keeping the old export-honest training path",
+    },
+    {
+        "name": "nospeed_i3l3r3_d640e512_q8",
+        "env": {
+            **cap16_nospeed_base(model_dim=640, embed_dim=512),
+            **BEST_CLEAN_VOCABMOE,
+            **q8_train_export_env(),
+        },
+        "notes": "token-interface cap-fill row: larger factored embedding and q8 train/export, no speed confound",
+    },
+    {
+        "name": "nospeed_i3l3r3_d704e320_q6",
+        "env": {
+            **cap16_nospeed_base(model_dim=704, embed_dim=320),
+            **BEST_CLEAN_VOCABMOE,
+        },
+        "notes": "moderate residual-width spend between d640 and the previously weak d768 rows",
+    },
+    {
+        "name": "nospeed_i3l3r3_d704e384_q8",
+        "env": {
+            **cap16_nospeed_base(model_dim=704, embed_dim=384),
+            **BEST_CLEAN_VOCABMOE,
+            **q8_train_export_env(),
+        },
+        "notes": "closer-to-cap quality row: d704 width, richer embedding rank, and q8 train/export",
+    },
+    {
+        "name": "nospeed_i3l3r3_d640e256_q6_vocabmoe_k16r4",
+        "env": {
+            **cap16_nospeed_base(model_dim=640, embed_dim=256),
+            **vocab_moe_env(experts=16, rank=4, mode="hybrid", layers="input,loop_first"),
+        },
+        "notes": "spend bytes inside the winning VocabMoE placement by doubling expert rank",
+    },
+    {
+        "name": "nospeed_i3l3r3_d640e256_q6_vocabmoe_k32r2",
+        "env": {
+            **cap16_nospeed_base(model_dim=640, embed_dim=256),
+            **vocab_moe_env(experts=32, rank=2, mode="hybrid", layers="input,loop_first"),
+        },
+        "notes": "spend bytes on more token/expert buckets while preserving rank-2 experts",
+    },
+    {
+        "name": "nospeed_i3l5r2_d640e256_q6",
+        "env": {
+            **cap16_nospeed_base(model_dim=640, embed_dim=256, io_width=3, loop_width=5, repeats=2),
+            **BEST_CLEAN_VOCABMOE,
+        },
+        "notes": "tests whether i3/l5/r2 loop diversity helps without d768, QK, LQER, or speed confounds",
+    },
+]
+
+
+CAP16_Q8_CAPFILL_CANDIDATES: list[dict[str, Any]] = [
+    {
+        "name": "capfill_i3l3r3_d640e640_q8",
+        "env": {
+            **cap16_nospeed_base(model_dim=640, embed_dim=640),
+            **BEST_CLEAN_VOCABMOE,
+            **q8_train_export_env(),
+        },
+        "notes": "extends the d640/e512/q8 win by spending more bytes on the token interface",
+    },
+    {
+        "name": "capfill_i3l3r3_d640e768_q8",
+        "env": {
+            **cap16_nospeed_base(model_dim=640, embed_dim=768),
+            **BEST_CLEAN_VOCABMOE,
+            **q8_train_export_env(),
+        },
+        "notes": "more aggressive token-interface spend, expected to move closer to the 16MB cap",
+    },
+    {
+        "name": "capfill_i3l3r3_d640e1024_q8",
+        "env": {
+            **cap16_nospeed_base(model_dim=640, embed_dim=1024),
+            **BEST_CLEAN_VOCABMOE,
+            **q8_train_export_env(),
+        },
+        "notes": "near-cap/over-cap probe: tests whether very large q8 factored embeddings keep buying BPB",
+    },
+    {
+        "name": "capfill_i3l3r3_d704e512_q8",
+        "env": {
+            **cap16_nospeed_base(model_dim=704, embed_dim=512),
+            **BEST_CLEAN_VOCABMOE,
+            **q8_train_export_env(),
+        },
+        "notes": "spends bytes on moderate residual width while keeping the proven e512/q8 token interface",
+    },
+    {
+        "name": "capfill_i3l3r3_d704e640_q8",
+        "env": {
+            **cap16_nospeed_base(model_dim=704, embed_dim=640),
+            **BEST_CLEAN_VOCABMOE,
+            **q8_train_export_env(),
+        },
+        "notes": "higher cap-fill row: d704 width plus larger q8 token interface",
+    },
+    {
+        "name": "capfill_i3l3r3_d768e512_q8",
+        "env": {
+            **cap16_nospeed_base(model_dim=768, embed_dim=512),
+            **BEST_CLEAN_VOCABMOE,
+            **q8_train_export_env(),
+        },
+        "notes": "checks whether d768 width becomes worthwhile once q8/e512 fixes the token interface",
+    },
+    {
+        "name": "capfill_i3l3r3_d640e512_q8_vocabmoe_k16r4",
+        "env": {
+            **cap16_nospeed_base(model_dim=640, embed_dim=512),
+            **vocab_moe_env(experts=16, rank=4, mode="hybrid", layers="input,loop_first", train_quant_bits=8),
+            **q8_train_export_env(),
+        },
+        "notes": "spends remaining bytes inside the winning VocabMoE placement with q8 expert rank",
+    },
+    {
+        "name": "capfill_i3l3r3_d640e512_q8_vocabmoe_k32r2",
+        "env": {
+            **cap16_nospeed_base(model_dim=640, embed_dim=512),
+            **vocab_moe_env(experts=32, rank=2, mode="hybrid", layers="input,loop_first", train_quant_bits=8),
+            **q8_train_export_env(),
+        },
+        "notes": "spends remaining bytes on more q8 token/expert buckets at the proven rank",
+    },
+    {
+        "name": "capfill_i3l5r2_d640e512_q8",
+        "env": {
+            **cap16_nospeed_base(model_dim=640, embed_dim=512, io_width=3, loop_width=5, repeats=2),
+            **BEST_CLEAN_VOCABMOE,
+            **q8_train_export_env(),
+        },
+        "notes": "combines the q8/e512 token-interface win with the more-unique-loop i3/l5/r2 shape",
+    },
+]
+
+
+CAP16_PRIORITY_CANDIDATES: list[dict[str, Any]] = [
+    {
+        "name": "priority_capfill_i3l3r3_d640e640_q8",
+        "env": {
+            **cap16_nospeed_base(model_dim=640, embed_dim=640),
+            **BEST_CLEAN_VOCABMOE,
+            **q8_train_export_env(),
+        },
+        "notes": "direct cap-fill continuation of the d640/e512/q8 win; isolates token-interface spend",
+    },
+    {
+        "name": "priority_vocabmoe_i3l3r3_d640e512_q8_k16r4",
+        "env": {
+            **cap16_nospeed_base(model_dim=640, embed_dim=512),
+            **vocab_moe_env(experts=16, rank=4, mode="hybrid", layers="input,loop_first", train_quant_bits=8),
+            **q8_train_export_env(),
+        },
+        "notes": "spends bytes on richer VocabMoE experts on the proven q8/e512 spine",
+    },
+    {
+        "name": "priority_loop_i3l5r2_d640e512_q8",
+        "env": {
+            **cap16_nospeed_base(model_dim=640, embed_dim=512, io_width=3, loop_width=5, repeats=2),
+            **BEST_CLEAN_VOCABMOE,
+            **q8_train_export_env(),
+        },
+        "notes": (
+            "tests whether the q8/e512 spine benefits from more unique loop "
+            "blocks; repeat count differs from i3/l3/r3 and needs a follow-up"
+        ),
+    },
+    {
+        "name": "priority_dual_i3l3r3_d640e512_q8_left256_r16",
+        "env": {
+            **cap16_nospeed_base(model_dim=640, embed_dim=512),
+            **BEST_CLEAN_VOCABMOE,
+            **q8_train_export_env(),
+            **dual_stream_env(left_dim=256, rank=16, sites="input,loop_first,pre_output", scale=0.02),
+        },
+        "notes": "trained dual-stream advisor bridge on the proven q8/e512 spine; the actual dual-stream canary",
+    },
+]
+
+
+CAP16_LOOP_FOLLOWUP_CANDIDATES: list[dict[str, Any]] = [
+    {
+        "name": "loopfollow_i3l5r5_d640e512_q8",
+        "env": {
+            **cap16_nospeed_base(model_dim=640, embed_dim=512, io_width=3, loop_width=5, repeats=5),
+            **BEST_CLEAN_VOCABMOE,
+            **q8_train_export_env(),
+        },
+        "notes": (
+            "tests the user's sharper read from the priority win: keep the "
+            "i3/l5 unique-loop shape and increase repeats to isolate whether "
+            "more recurrence on the wider unique core buys quality"
+        ),
+    },
+]
+
+
+def layer_width_schedule_env(widths: tuple[int, ...]) -> dict[str, str]:
+    return {
+        "LAYER_WIDTH_SCHEDULE": ",".join(str(width) for width in widths),
+        # Width ladders currently cannot share the depth-LoRA/basis/VE paths.
+        "DEPTH_LORA_RANK": "0",
+        "BASIS_XSA_ENABLED": "0",
+        "VE_ENABLED": "0",
+    }
+
+
+CAP16_STRUCTURE_FOLLOWUP_CANDIDATES: list[dict[str, Any]] = [
+    {
+        "name": "structure_dual_i3l5r5_d640e512_q8_left256_r16_loopx",
+        "env": {
+            **cap16_nospeed_base(model_dim=640, embed_dim=512, io_width=3, loop_width=5, repeats=5),
+            **BEST_CLEAN_VOCABMOE,
+            **q8_train_export_env(),
+            **dual_stream_env(
+                left_dim=256,
+                rank=16,
+                sites="input,loop_first,loop_exit,pre_output",
+                scale=0.02,
+            ),
+        },
+        "notes": (
+            "ports the trained left/right advisor bridge onto the current "
+            "best i3/l5/r5 spine and adds a loop-exit bridge site"
+        ),
+    },
+    {
+        "name": "structure_hourglass_i3l5r5_d640e512_q8_w400-480-560-640",
+        "env": {
+            **cap16_nospeed_base(model_dim=640, embed_dim=512, io_width=3, loop_width=5, repeats=5),
+            **BEST_CLEAN_VOCABMOE,
+            **q8_train_export_env(),
+            **layer_width_schedule_env((400, 480, 560, 640, 640, 640, 640, 640)),
+        },
+        "notes": (
+            "hourglass-width probe: narrower token-facing IO blocks, full-width "
+            "recurrent core, same q8/e512 i3/l5/r5 spine"
+        ),
+    },
+]
+
+
+CAP16_STRUCTURE_COMBO_CANDIDATES: list[dict[str, Any]] = [
+    {
+        "name": "structure_combo_i3l5r5_d640e512_q16q8q4io_q8core_w400-480-560-640_dual",
+        "env": {
+            **cap16_nospeed_base(model_dim=640, embed_dim=512, io_width=3, loop_width=5, repeats=5),
+            **BEST_CLEAN_VOCABMOE,
+            **q8_core_io_ladder_env((16, 8, 4)),
+            **layer_width_schedule_env((400, 480, 560, 640, 640, 640, 640, 640)),
+            **dual_stream_env(
+                left_dim=256,
+                rank=16,
+                sites="input,loop_first,loop_exit,pre_output",
+                scale=0.02,
+            ),
+        },
+        "notes": (
+            "single high-signal interaction row: train-time IO-tail precision "
+            "ladder q16/q8/q4, hourglass block widths, q8 recurrent core, and "
+            "the trained dual-stream advisor on the current best i3/l5/r5 spine"
+        ),
+    },
+]
+
+
+CAP16_FRONTIER_CAPFILL_CANDIDATES: list[dict[str, Any]] = [
+    {
+        "name": "frontier_capfill_i3l5r5_d640e640_q8",
+        "env": {
+            **cap16_nospeed_base(model_dim=640, embed_dim=640, io_width=3, loop_width=5, repeats=5),
+            **BEST_CLEAN_VOCABMOE,
+            **q8_train_export_env(),
+            **FINAL_ONLY_EVAL_ENV,
+        },
+        "notes": (
+            "directly spends the remaining 16MB headroom on factored tied "
+            "embedding rank while preserving the current best full-width "
+            "single-stream i3/l5/r5 q8 spine"
+        ),
+    },
+    {
+        "name": "frontier_lqer_i3l5r5_d640e512_q8_r12t24_embed",
+        "env": {
+            **cap16_nospeed_base(model_dim=640, embed_dim=512, io_width=3, loop_width=5, repeats=5),
+            **BEST_CLEAN_VOCABMOE,
+            **q8_train_export_env(),
+            **cap16_lqer_env(12, 24),
+            **FINAL_ONLY_EVAL_ENV,
+        },
+        "notes": (
+            "export-gap repair probe: stronger asymmetric LQER and embed_proj "
+            "coverage on the exact best q8/e512 i3/l5/r5 spine"
+        ),
+    },
+    {
+        "name": "frontier_polarminlr10_i3l5r5_d640e512_q8",
+        "env": {
+            **cap16_nospeed_base(model_dim=640, embed_dim=512, io_width=3, loop_width=5, repeats=5),
+            **BEST_CLEAN_VOCABMOE,
+            **q8_train_export_env(),
+            **leaderboard_schedule_env(min_lr=0.10),
+            **FINAL_ONLY_EVAL_ENV,
+        },
+        "notes": (
+            "ports the current public transformer schedule polish: Polar "
+            "Express Newton-Schulz plus a 10% warmdown LR floor"
+        ),
+    },
+    {
+        "name": "frontier_qk525_parres4_i3l5r5_d640e512_q8",
+        "env": {
+            **cap16_nospeed_base(model_dim=640, embed_dim=512, io_width=3, loop_width=5, repeats=5),
+            **BEST_CLEAN_VOCABMOE,
+            **q8_train_export_env(),
+            **parallel_residual_env(last_n=4),
+            "QK_GAIN_INIT": "5.25",
+            **FINAL_ONLY_EVAL_ENV,
+        },
+        "notes": (
+            "ports the accepted-leader routing/gain pair: wider parallel "
+            "residual tail plus QK gain 5.25 on the current best HRC/VocabMoE spine"
+        ),
+    },
+]
+
+
+CAP16_FRONTIER_FOLLOWUP_CANDIDATES: list[dict[str, Any]] = [
+    {
+        "name": "frontier_follow_i3l5r5_d640e640_q8_polarminlr10",
+        "env": {
+            **cap16_nospeed_base(model_dim=640, embed_dim=640, io_width=3, loop_width=5, repeats=5),
+            **BEST_CLEAN_VOCABMOE,
+            **q8_train_export_env(),
+            **leaderboard_schedule_env(min_lr=0.10),
+            **FINAL_ONLY_EVAL_ENV,
+        },
+        "notes": (
+            "combines the two winning levers from the completed cap-fill "
+            "matrix: e640 token-interface spend and Polar/MIN_LR schedule"
+        ),
+    },
+    {
+        "name": "frontier_follow_i3l5r5_d640e768_q8_polarminlr10",
+        "env": {
+            **cap16_nospeed_base(model_dim=640, embed_dim=768, io_width=3, loop_width=5, repeats=5),
+            **BEST_CLEAN_VOCABMOE,
+            **q8_train_export_env(),
+            **leaderboard_schedule_env(min_lr=0.10),
+            **FINAL_ONLY_EVAL_ENV,
+        },
+        "notes": (
+            "tests whether the e640 cap-spend win keeps scaling closer to 16MB "
+            "when paired with the now-winning Polar/MIN_LR schedule"
+        ),
+    },
+    {
+        "name": "frontier_follow_i3l5r5_d640e640_q8_polarminlr10_lqer12t24_embed",
+        "env": {
+            **cap16_nospeed_base(model_dim=640, embed_dim=640, io_width=3, loop_width=5, repeats=5),
+            **BEST_CLEAN_VOCABMOE,
+            **q8_train_export_env(),
+            **leaderboard_schedule_env(min_lr=0.10),
+            **cap16_lqer_env(12, 24),
+            **FINAL_ONLY_EVAL_ENV,
+        },
+        "notes": (
+            "combines the winning e640+Polar idea with the small positive LQER "
+            "repair row; useful because artifact headroom remains"
+        ),
+    },
+    {
+        "name": "frontier_follow_i3l5r5_d640e640_q8_polarminlr05",
+        "env": {
+            **cap16_nospeed_base(model_dim=640, embed_dim=640, io_width=3, loop_width=5, repeats=5),
+            **BEST_CLEAN_VOCABMOE,
+            **q8_train_export_env(),
+            **leaderboard_schedule_env(min_lr=0.05),
+            **FINAL_ONLY_EVAL_ENV,
+        },
+        "notes": (
+            "schedule sensitivity row: tests whether a gentler 5% LR floor "
+            "beats the public-inspired 10% floor on the e640 spine"
+        ),
+    },
+]
+
+
+CAP16_BREAKOUT_CANDIDATES: list[dict[str, Any]] = [
+    {
+        "name": "breakout_dense11_d512e512_q8_polar_vocabmoe_bigram",
+        "env": {
+            **cap16_baseline_base(model_dim=512, embed_dim=512, num_layers=11, num_kv_heads=1),
+            **BEST_CLEAN_VOCABMOE,
+            **q8_train_export_env(),
+            **leaderboard_schedule_env(min_lr=0.10),
+            **bigram_hash_env(vocab_size=10240, dim=32),
+            **FINAL_ONLY_EVAL_ENV,
+        },
+        "notes": (
+            "dense SP8192-like transformer branch: tests whether the HRC "
+            "recurrence itself is the quality ceiling, with BigramHash as the "
+            "cheap public-side-feature canary"
+        ),
+    },
+    {
+        "name": "breakout_dense13_d512e384_q8_polar_vocabmoe",
+        "env": {
+            **cap16_baseline_base(model_dim=512, embed_dim=384, num_layers=13, num_kv_heads=1),
+            **BEST_CLEAN_VOCABMOE,
+            **q8_train_export_env(),
+            **leaderboard_schedule_env(min_lr=0.10),
+            **FINAL_ONLY_EVAL_ENV,
+        },
+        "notes": (
+            "physical-depth control: spends bytes on unique transformer blocks "
+            "instead of recurrent reuse or larger embeddings"
+        ),
+    },
+    {
+        "name": "breakout_dense11_d640e384_q6_fullkv_memattn_vocabmoe_bigram",
+        "env": {
+            **cap16_baseline_base(model_dim=640, embed_dim=384, num_layers=11, num_kv_heads=10),
+            **BEST_CLEAN_VOCABMOE,
+            **leaderboard_schedule_env(min_lr=0.10),
+            **bigram_hash_env(vocab_size=10240, dim=32),
+            "SDP_BACKEND": "mem_efficient",
+            **FINAL_ONLY_EVAL_ENV,
+        },
+        "notes": (
+            "quality/systems branch: wider dense model with full K/V heads so "
+            "the 2060 can use memory-efficient attention instead of the GQA "
+            "math path"
+        ),
+    },
+    {
+        "name": "breakout_hrc_i3l5r5_d640e512_q8_polar_ttt_control24",
+        "env": {
+            **cap16_nospeed_base(model_dim=640, embed_dim=512, io_width=3, loop_width=5, repeats=5),
+            **BEST_CLEAN_VOCABMOE,
+            **q8_train_export_env(),
+            **leaderboard_schedule_env(min_lr=0.10),
+            **legal_ttt_env(lr=0.005, updates=24),
+            **FINAL_ONLY_EVAL_ENV,
+        },
+        "notes": (
+            "legal score-first TTT canary on the current best HRC/VocabMoE "
+            "spine; if this fails, polishing eval-only adaptation is not the "
+            "right next local spend"
+        ),
+    },
+    {
+        "name": "breakout_hrc_i3l7r4_d640e512_q8_polar_bigram",
+        "env": {
+            **cap16_nospeed_base(model_dim=640, embed_dim=512, io_width=3, loop_width=7, repeats=4),
+            **BEST_CLEAN_VOCABMOE,
+            **q8_train_export_env(),
+            **leaderboard_schedule_env(min_lr=0.10),
+            **bigram_hash_env(vocab_size=10240, dim=32),
+            **FINAL_ONLY_EVAL_ENV,
+        },
+        "notes": (
+            "tests the user's unique-loop-block signal while also porting the "
+            "cheap BigramHash lever from the public transformer lane"
+        ),
+    },
+    {
+        "name": "breakout_dual_i3l5r2_d768e320_left256_q6_polar_vocabmoe_lqer16t32",
+        "env": {
+            **cap16_speed_base(model_dim=768, embed_dim=320, io_width=3, loop_width=5, repeats=2),
+            **cap16_lqer_env(16, 32),
+            **BEST_CLEAN_VOCABMOE,
+            **leaderboard_schedule_env(),
+            **dual_stream_env(left_dim=256, rank=16),
+            **FINAL_ONLY_EVAL_ENV,
+        },
+        "notes": (
+            "one true dual-stream probe, trained end-to-end rather than eval "
+            "council; included as a broad architecture branch, not as a whole "
+            "night of variants"
+        ),
+    },
+]
+
+
+CAP16_ART_SHOWCASE_CANDIDATES: list[dict[str, Any]] = [
+    {
+        "name": "art_prime_skip_spike_i3p5s1r2_d640e512_q8",
+        "env": {
+            **cap16_nospeed_base(model_dim=640, embed_dim=512, io_width=3, loop_width=5, repeats=2),
+            **prime_superloop_route(shell_width=3, prime_width=5, laps_per_skip=2, skip_ids=(1,)),
+            **spike_vocab_moe_env(
+                experts=16,
+                rank=2,
+                mode="spike_hybrid",
+                layers="input,loop_every3",
+                spike_top_k=2,
+                train_quant_bits=8,
+            ),
+            **q8_train_export_env(),
+            **FINAL_ONLY_EVAL_ENV,
+        },
+        "notes": (
+            "art lane: prime-width recurrent core with a nontrivial skip walk, "
+            "and hard token self-election without the extra dual-stream bridge "
+            "that wedged the first smoke after step 10"
+        ),
+    },
+    {
+        "name": "art_pal_ladder_hourglass_dual_spike_i3l5r1_d640e512_q8",
+        "env": {
+            **cap16_nospeed_base(model_dim=640, embed_dim=512, io_width=3, loop_width=5, repeats=1),
+            **palindrome_loop_route(io_width=3, loop_width=5, loop_repeats=1),
+            **q8_core_io_ladder_env((16, 8, 4)),
+            **layer_width_schedule_env((400, 440, 520, 640, 640, 640, 640, 640)),
+            **spike_vocab_moe_env(
+                experts=16,
+                rank=2,
+                mode="spike_hybrid",
+                layers="input,loop_first",
+                spike_top_k=2,
+                train_quant_bits=8,
+            ),
+            **dual_stream_env(left_dim=256, rank=16, sites="input,loop_first,loop_exit,pre_output"),
+            **FINAL_ONLY_EVAL_ENV,
+        },
+        "notes": (
+            "art lane: mirrored palindrome route plus q16/q8/q4 IO-tail ladder, "
+            "hourglass block widths, spike VocabMoE, and dual-stream bridges"
+        ),
+    },
+    {
+        "name": "art_rlm_council_hybrid_i3l5r5_d640e512_q8",
+        "env": {
+            **cap16_nospeed_base(model_dim=640, embed_dim=512, io_width=3, loop_width=5, repeats=5),
+            **BEST_CLEAN_VOCABMOE,
+            **q8_train_export_env(),
+            **leaderboard_schedule_env(min_lr=0.10),
+            **rlm_memory_env(inject="input_loop_first", decay=0.95, scale=0.01),
+            **council_env(mode="base_mirror_hybrid", mirror="householder", offsets="0,0,-1"),
+            **FINAL_ONLY_EVAL_ENV,
+        },
+        "notes": (
+            "art lane: legal recursive prefix memory plus a three-peer mirrored "
+            "council distribution on the strongest HRC/VocabMoE spine"
+        ),
+    },
+    {
+        "name": "art_loopall_self_electing_rlm_i3l5r5_d640e512_q8",
+        "env": {
+            **cap16_nospeed_base(model_dim=640, embed_dim=512, io_width=3, loop_width=5, repeats=5),
+            **q8_train_export_env(),
+            **spike_vocab_moe_env(
+                experts=32,
+                rank=1,
+                mode="spike_hybrid",
+                layers="input,loop",
+                spike_top_k=2,
+                train_quant_bits=8,
+            ),
+            **rlm_memory_env(inject="loop_first", decay=0.90, scale=0.02),
+            **FINAL_ONLY_EVAL_ENV,
+        },
+        "notes": (
+            "art lane: every recurrent-loop position gets sparse token expert "
+            "self-election, with a causal RLM-lite memory injected at loop entry"
+        ),
+    },
+    {
+        "name": "art_firstattn_mlp_core_i3l7r3_d640e512_q8",
+        "env": {
+            **cap16_nospeed_base(model_dim=640, embed_dim=512, io_width=3, loop_width=7, repeats=3),
+            **BEST_CLEAN_VOCABMOE,
+            **q8_train_export_env(),
+            **leaderboard_schedule_env(min_lr=0.10),
+            "HRC_MLP_ONLY_BLOCKS": "4,5,6,7,8,9",
+            **rlm_memory_env(inject="input", decay=0.90, scale=0.02),
+            **FINAL_ONLY_EVAL_ENV,
+        },
+        "notes": (
+            "art lane: one attention-capable block at recurrent-core entry, "
+            "then a mostly MLP recurrent semantic engine with legal memory"
+        ),
+    },
+    {
+        "name": "art_dual_hourglass_q2core_i4l5r3_d768e512",
+        "env": {
+            **cap16_nospeed_base(model_dim=768, embed_dim=512, io_width=4, loop_width=5, repeats=3),
+            **cap16_taper_env(io_width=4, loop_width=5, io_bits=(16, 8, 6, 4), core_bits=2),
+            **layer_width_schedule_env((384, 432, 504, 576, 648, 696, 768, 768, 768)),
+            **spike_vocab_moe_env(
+                experts=16,
+                rank=2,
+                mode="spike_hybrid",
+                layers="input,loop_first",
+                spike_top_k=2,
+                train_quant_bits=6,
+            ),
+            **dual_stream_env(left_dim=320, rank=24, sites="input,loop_first,loop_exit,pre_output"),
+            **FINAL_ONLY_EVAL_ENV,
+        },
+        "notes": (
+            "art lane: the full data-density sketch: higher-precision narrow "
+            "IO blocks, wider low-precision q2 recurrent core, spike VocabMoE, "
+            "and trained dual-stream advisor bridges"
+        ),
+    },
+]
+
+
+CAP16_H100_PREFLIGHT_CANDIDATES: list[dict[str, Any]] = [
+    {
+        "name": "preflight_h100_anchor_i3l5r5_d640e512_q8_polar",
+        "env": {
+            **cap16_nospeed_base(model_dim=640, embed_dim=512, io_width=3, loop_width=5, repeats=5),
+            **BEST_CLEAN_VOCABMOE,
+            **q8_train_export_env(),
+            **leaderboard_schedule_env(min_lr=0.10),
+            **FINAL_ONLY_EVAL_ENV,
+        },
+        "notes": (
+            "local H100-spend gate: exact clean anchor from the paid matrix, "
+            "run locally first to recheck export behavior and current code"
+        ),
+    },
+    {
+        "name": "preflight_h100_e640_i3l5r5_d640e640_q8_polar",
+        "env": {
+            **cap16_nospeed_base(model_dim=640, embed_dim=640, io_width=3, loop_width=5, repeats=5),
+            **BEST_CLEAN_VOCABMOE,
+            **q8_train_export_env(),
+            **leaderboard_schedule_env(min_lr=0.10),
+            **FINAL_ONLY_EVAL_ENV,
+        },
+        "notes": (
+            "local H100-spend gate: spends more bytes on the token interface "
+            "without changing the proven i3/l5/r5 route"
+        ),
+    },
+    {
+        "name": "preflight_h100_i3l7r4_d640e512_q8_polar_bigram",
+        "env": {
+            **cap16_nospeed_base(model_dim=640, embed_dim=512, io_width=3, loop_width=7, repeats=4),
+            **BEST_CLEAN_VOCABMOE,
+            **q8_train_export_env(),
+            **leaderboard_schedule_env(min_lr=0.10),
+            **bigram_hash_env(vocab_size=10240, dim=32),
+            **FINAL_ONLY_EVAL_ENV,
+        },
+        "notes": (
+            "local H100-spend gate: more unique recurrent blocks plus the "
+            "cheap BigramHash side-feature lever"
+        ),
+    },
+    {
+        "name": "preflight_h100_dual_i3l5r5_d640e512_q8_polar_left256",
+        "env": {
+            **cap16_nospeed_base(model_dim=640, embed_dim=512, io_width=3, loop_width=5, repeats=5),
+            **BEST_CLEAN_VOCABMOE,
+            **q8_train_export_env(),
+            **leaderboard_schedule_env(min_lr=0.10),
+            **dual_stream_env(left_dim=256, rank=16, sites="input,loop_first,loop_exit,pre_output"),
+            **FINAL_ONLY_EVAL_ENV,
+        },
+        "notes": (
+            "local H100-spend gate: trained left/right advisor bridge on the "
+            "current best route, not eval-only council"
+        ),
+    },
+    {
+        "name": "preflight_h100_spike_loopall_i3l5r5_d640e512_q8_polar",
+        "env": {
+            **cap16_nospeed_base(model_dim=640, embed_dim=512, io_width=3, loop_width=5, repeats=5),
+            **q8_train_export_env(),
+            **leaderboard_schedule_env(min_lr=0.10),
+            **spike_vocab_moe_env(
+                experts=32,
+                rank=1,
+                mode="spike_hybrid",
+                layers="input,loop",
+                spike_top_k=2,
+                train_quant_bits=8,
+            ),
+            **FINAL_ONLY_EVAL_ENV,
+        },
+        "notes": (
+            "local H100-spend gate: exact spike/self-election paid-row shape, "
+            "without the RLM bundle that crashed locally"
+        ),
+    },
+]
+
+
 CAP16_LEADERBOARD_CANDIDATES: list[dict[str, Any]] = [
     {
         "name": "leader_i3l3r3_d768e320_q6all_polar_minlr_vocabmoe_qk525_lqer16t32",
@@ -1097,6 +2123,19 @@ CANDIDATE_GROUPS: dict[str, list[dict[str, Any]]] = {
     "council_rlm": COUNCIL_RLM_CANDIDATES,
     "cap16_speed": CAP16_SPEED_CANDIDATES,
     "cap16_mainline": CAP16_MAINLINE_CANDIDATES,
+    "cap16_anchor_spend": CAP16_ANCHOR_SPEND_CANDIDATES,
+    "cap16_anchor_clean_spend": CAP16_ANCHOR_CLEAN_SPEND_CANDIDATES,
+    "cap16_anchor_nospeed_spend": CAP16_ANCHOR_NOSPEED_SPEND_CANDIDATES,
+    "cap16_q8_capfill": CAP16_Q8_CAPFILL_CANDIDATES,
+    "cap16_priority": CAP16_PRIORITY_CANDIDATES,
+    "cap16_loop_followup": CAP16_LOOP_FOLLOWUP_CANDIDATES,
+    "cap16_structure_followup": CAP16_STRUCTURE_FOLLOWUP_CANDIDATES,
+    "cap16_structure_combo": CAP16_STRUCTURE_COMBO_CANDIDATES,
+    "cap16_frontier_capfill": CAP16_FRONTIER_CAPFILL_CANDIDATES,
+    "cap16_frontier_followup": CAP16_FRONTIER_FOLLOWUP_CANDIDATES,
+    "cap16_breakout": CAP16_BREAKOUT_CANDIDATES,
+    "cap16_art_showcase": CAP16_ART_SHOWCASE_CANDIDATES,
+    "cap16_h100_preflight": CAP16_H100_PREFLIGHT_CANDIDATES,
     "cap16_leaderboard": CAP16_LEADERBOARD_CANDIDATES,
     "cap16_dual_stream": CAP16_DUAL_STREAM_CANDIDATES,
     "all": (
@@ -1105,6 +2144,19 @@ CANDIDATE_GROUPS: dict[str, list[dict[str, Any]]] = {
         + COUNCIL_RLM_CANDIDATES
         + CAP16_SPEED_CANDIDATES
         + CAP16_MAINLINE_CANDIDATES
+        + CAP16_ANCHOR_SPEND_CANDIDATES
+        + CAP16_ANCHOR_CLEAN_SPEND_CANDIDATES
+        + CAP16_ANCHOR_NOSPEED_SPEND_CANDIDATES
+        + CAP16_Q8_CAPFILL_CANDIDATES
+        + CAP16_PRIORITY_CANDIDATES
+        + CAP16_LOOP_FOLLOWUP_CANDIDATES
+        + CAP16_STRUCTURE_FOLLOWUP_CANDIDATES
+        + CAP16_STRUCTURE_COMBO_CANDIDATES
+        + CAP16_FRONTIER_CAPFILL_CANDIDATES
+        + CAP16_FRONTIER_FOLLOWUP_CANDIDATES
+        + CAP16_BREAKOUT_CANDIDATES
+        + CAP16_ART_SHOWCASE_CANDIDATES
+        + CAP16_H100_PREFLIGHT_CANDIDATES
         + CAP16_LEADERBOARD_CANDIDATES
         + CAP16_DUAL_STREAM_CANDIDATES
     ),
@@ -1183,6 +2235,8 @@ def write_candidate_plan(out_dir: Path, candidates: list[dict[str, Any]], iterat
             )
         if env.get("QUANT_BITS_OVERRIDES"):
             extras.append(f"bits={env.get('QUANT_BITS_OVERRIDES')}")
+        if env.get("LAYER_WIDTH_SCHEDULE"):
+            extras.append(f"widths={env.get('LAYER_WIDTH_SCHEDULE')}")
         if extras:
             moe = f"{moe}; " + "; ".join(extras)
         lines.append(f"| `{candidate['name']}` | `{route}` | `{moe}` | {candidate['notes']} |")
@@ -1217,6 +2271,84 @@ def write_summary(out_dir: Path, rows: list[dict[str, object]]) -> None:
             f"headroom={row.get('artifact_headroom', 'n/a')}"
         )
     (out_dir / "summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def run_command_live(
+    args: list[str],
+    env: dict[str, str],
+    timeout: int,
+    live_path: Path,
+    label: str,
+) -> subprocess.CompletedProcess[str]:
+    """Run a candidate while teeing progress to disk and queue stdout."""
+    sentinel = object()
+    output_queue: queue.Queue[str | object] = queue.Queue()
+    lines: list[str] = []
+
+    def reader(pipe: Any) -> None:
+        try:
+            for line in pipe:
+                output_queue.put(line)
+        finally:
+            output_queue.put(sentinel)
+
+    live_path.parent.mkdir(parents=True, exist_ok=True)
+    with live_path.open("w", encoding="utf-8", errors="replace") as live_file:
+        proc = subprocess.Popen(
+            args,
+            cwd=ROOT,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            bufsize=1,
+        )
+        if proc.stdout is None:
+            raise RuntimeError("subprocess stdout pipe was not created")
+        thread = threading.Thread(target=reader, args=(proc.stdout,), daemon=True)
+        thread.start()
+        started = time.perf_counter()
+        timed_out = False
+        reader_done = False
+        while True:
+            try:
+                item = output_queue.get(timeout=0.5)
+            except queue.Empty:
+                if timeout > 0 and time.perf_counter() - started > timeout:
+                    timed_out = True
+                    proc.kill()
+                    break
+                if proc.poll() is not None and reader_done:
+                    break
+                continue
+
+            if item is sentinel:
+                reader_done = True
+            else:
+                line = str(item)
+                lines.append(line)
+                live_file.write(line)
+                live_file.flush()
+                text = line.strip()
+                if text.startswith("step:") or text.startswith("final_") or text.startswith("TIMEOUT"):
+                    print(f"{label}: {text}", flush=True)
+
+            if proc.poll() is not None and reader_done:
+                break
+
+        if timed_out:
+            timeout_line = f"\nTIMEOUT after {timeout}s\n"
+            lines.append(timeout_line)
+            live_file.write(timeout_line)
+            live_file.flush()
+            print(f"{label}: TIMEOUT after {timeout}s", flush=True)
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            return subprocess.CompletedProcess(args, 124, "".join(lines))
+
+        return subprocess.CompletedProcess(args, proc.wait(), "".join(lines))
 
 
 def run_matrix(
@@ -1265,13 +2397,14 @@ def run_matrix(
                 "QUANT_TRAIN_MODE": "none",
                 "LOG_CODE_SNAPSHOT": "0",
                 "LOG_NVIDIA_SMI": "0",
+                "TRAIN_LOG_EVERY": "250",
                 "PYTHONUNBUFFERED": "1",
             }
         )
         started = time.perf_counter()
-        proc = run_command([str(PYTHON), "-u", str(TRAINER)], env, timeout=timeout)
-        stdout = merged_train_output(proc.stdout, run_id)
         raw_path = out_dir / f"train_{name}.txt"
+        proc = run_command_live([str(PYTHON), "-u", str(TRAINER)], env, timeout=timeout, live_path=raw_path, label=name)
+        stdout = merged_train_output(proc.stdout, run_id)
         raw_path.write_text(stdout, encoding="utf-8")
         row: dict[str, object] = {
             "candidate": name,

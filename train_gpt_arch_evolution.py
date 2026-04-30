@@ -2548,23 +2548,40 @@ def build_hrc_route_metadata(
                 f"got EFFECTIVE_DEPTH={depth}, expected {len(schedule)}"
             )
         return schedule, infer_mirror_schedule(schedule)
-    if schedule_mode not in {
+    tail_cycle_width: int | None = None
+    if schedule_mode.startswith("transition_tail") and schedule_mode.endswith("_cycle"):
+        raw_tail = schedule_mode[len("transition_tail") : -len("_cycle")]
+        if raw_tail.isdigit():
+            tail_cycle_width = int(raw_tail)
+        else:
+            raise ValueError(
+                "transition_tailN_cycle HRC routes require an integer tail width N; "
+                f"got {mode!r}"
+            )
+    if tail_cycle_width is None and schedule_mode not in {
         "transition_recursive_cycle",
         "transition_recursive_palindrome",
     }:
         raise ValueError(
             "HRC_DEPTH_SCHEDULE_MODE must be one of "
             "cycle|palindrome|edge_palindrome|anchored_palindrome|recursive_palindrome|"
-            "transition_recursive_cycle|transition_recursive_palindrome|prime_skip_superloop, "
+            "transition_recursive_cycle|transition_recursive_palindrome|transition_tailN_cycle|"
+            "prime_skip_superloop, "
             f"got {mode!r}"
         )
     if core_start < 1 or core_start >= unique_blocks:
         raise ValueError(
-            "transition_recursive HRC routes require 1 <= HRC_RECURSIVE_CORE_START < NUM_UNIQUE_BLOCKS; "
+            "transition HRC routes require 1 <= HRC_RECURSIVE_CORE_START < NUM_UNIQUE_BLOCKS; "
             f"got HRC_RECURSIVE_CORE_START={core_start}, NUM_UNIQUE_BLOCKS={unique_blocks}"
         )
     prefix = list(range(core_start))
-    if schedule_mode == "transition_recursive_cycle":
+    if tail_cycle_width is not None:
+        full_core = list(range(core_start, unique_blocks))
+        if tail_cycle_width <= 0:
+            raise ValueError(f"transition_tailN_cycle requires N >= 1, got {tail_cycle_width}")
+        tail = full_core[-min(tail_cycle_width, len(full_core)) :]
+        core = full_core * repeats + tail
+    elif schedule_mode == "transition_recursive_cycle":
         core = list(range(core_start, unique_blocks)) * repeats
     else:
         base_core = list(range(core_start, unique_blocks)) + list(range(unique_blocks - 2, core_start - 1, -1))

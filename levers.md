@@ -1,6 +1,6 @@
 # Project Levers
 
-Date: 2026-04-27
+Date: 2026-04-29
 
 This is the working lever catalog for the Parameter Golf experiments in this
 repo. It is meant to answer: "What knobs can we pull, what do they buy us, what
@@ -8,19 +8,63 @@ do they cost, and what have we already learned?"
 
 The short current read:
 
-- Best completed 16MB VocabMoE row:
+- Current strategic read: because we have not verified on 8xH100, the best
+  near-term submission lane is non-record/art rather than official-record
+  chasing. The current matrix is therefore a weird-but-auditable showcase:
+  prime skip recurrence, mirrored IO tails, train-time precision/width ladders,
+  spike/self-election LexLoRE/VocabMoE, legal RLM-lite memory, council
+  distributions, and trained dual-stream advisor bridges. For the public names
+  behind the code flags, see `records/architecture_explainer_20260430.md`. See
+  `records/art_showcase_plan_20260429.md`.
+- Paid H100 strategy: do not spend the budget on a vanilla leaderboard clone.
+  First run the local `cap16_h100_preflight` group as a money-saving gate. The
+  prepared H100 path is a five-row novel-contender scout around our own
+  MirrorLoop/HRC plus LexLoRE/VocabMoE spine: current best i3/l5/r5 q8/e512,
+  e640 token-interface spend, i3/l7/r4 unique-loop diversity, trained
+  dual-stream advisor, and spike/self-election LexLoRE/VocabMoE. See
+  `records/local_h100_preflight_plan_20260429.md`,
+  `records/runpod_no_fetch_plan_20260429.md`,
+  `records/h100_novel_contender_plan_20260429.md` and
+  `scripts/run_h100_novel_matrix.py`.
+- Current active queue:
+  `records/cap16-art-showcase-2k-auto-20260429-173955`. The runner streams
+  live progress to `queue.out.log` and active `train_*.txt` files, and forces
+  `TRAIN_LOG_EVERY=250` for at-a-glance step timing.
+- Best completed 16MB local row:
+  `frontier_polarminlr10_i3l5r5_d640e512_q8`, final export `1.53362322`
+  BPB, `1560.22ms/step`, `14,091,166` bytes. The current winning spine is
+  export-honest q8 train/export, e512 factored tied embeddings, dense
+  LexLoRE/VocabMoE at input plus loop-first, more unique loop blocks with r5
+  recurrence, and Polar Express Muon with a 10% minimum LR floor.
+- Best cap-spend-only row:
+  `frontier_capfill_i3l5r5_d640e640_q8`, final export `1.53679911` BPB,
+  `1604.10ms/step`, `14,574,862` bytes. e640 token-interface spend helped,
+  but did not beat Polar/MIN_LR on e512.
+- Previous completed 16MB local row:
+  `loopfollow_i3l5r5_d640e512_q8`, final export `1.5415` BPB,
+  `1559.74ms/step`, `13,814,802` bytes. The current winning spine is
+  export-honest q8 train/export, e512 factored tied embeddings, dense
+  VocabMoE at input plus loop-first, and more unique loop blocks with r5
+  recurrence.
+- Best old compact 16MB VocabMoE anchor:
   `i3l3r3_d640e256_q6_vocabmoe_hybrid_k16r2_input_loopfirst`, final export
-  `1.8710` BPB, `832.11ms/step`, `6,218,621` bytes. The winning placement is
-  "input plus first recurrent-loop block", not loop-only or hidden-only.
+  `1.8710` BPB, `832.11ms/step`, `6,218,621` bytes. This remains useful as a
+  cheap control, but it has been superseded for quality by the q8/e512 i3/l5
+  family.
+- Best overnight/promoted 16MB challenger:
+  `mainline_i3l5r2_d768e320_q6all_vocabmoe_qk525_lqer16t32`, final export
+  `1.8816` BPB, `1085.46ms/step`, `8,289,170` bytes. It is a useful near
+  miss, but it is slower, larger, and still worse than the d640/e256 anchor.
 - Council/RLM-lite revival on that VocabMoE anchor did not beat the dense
   anchor after export. The best completed council/RLM row is hard-gated council
   at `1.8846` BPB; dynamic council, RLM-lite, and RLM+council all exported
   worse.
-- Spiking/self-election VocabMoE has not yet produced a valid matrix result.
-  The first spike queue only wrote a plan and exited at the old idle threshold.
-  The spike candidate definitions now use a small token-prior tie-breaker
-  (`VOCAB_MOE_PRIOR_INIT_STD=0.01`) so hard top-k does not send every token to
-  the same expert bucket at step zero.
+- Spiking/self-election VocabMoE is now validated but not promoted. The best
+  corrected row is
+  `i3l3r3_d640e256_q6_vocabmoe_spikehybrid_k16r2_input_loopfirst_top2`,
+  final export `1.8792` BPB, `866.19ms/step`, `6,254,694` bytes. This is close
+  enough to keep as a narrow branch, but it still loses to the dense VocabMoE
+  anchor.
 - Best fixed-step clean sub-4MB local row:
   `i5l5r9_d512e192_q16q8q4q2t_coret_lqer_lidx_r6t12`, final export
   `2.5608` BPB, `188.33ms/step`, `3,882,787` bytes.
@@ -46,17 +90,16 @@ The short current read:
   `2.4884` BPB, `267.67ms/step`, `6,050,853` bytes. This made "one full
   attention block at the recurrent-core entry" the current best soft-size
   quality lever.
-- Current pruned sub4 follow-up is running under
-  `records/sub4-leader-pruned-5k-auto-20260427-012503`. Early completed rows:
-  QK 5.25 baseline exported at `2.4792` BPB and the attention-output-gate row
-  exported worse at `2.4997` BPB. The public-style stacked row went nonfinite
-  and was stopped; do not keep stacking public levers until each one has a
-  stable local anchor.
-- Next 16MB cap-speed scout:
-  `cap16_speed` in `scripts/run_16mb_vocab_moe_matrix.py`. It reruns the best
-  dense VocabMoE placement with sub-4 speed levers, QK 5.25, LQER r12/t24, and
-  selective d768 width/embedding/unique-loop spends under the official 16MB
-  cap.
+- Completed pruned sub4 follow-up:
+  `records/sub4-leader-pruned-5k-auto-20260427-012503`. QK 5.25 on the
+  soft-size i4/l9/r5 row exported at `2.4792` BPB and `5,908,181` bytes;
+  Huber WD was neutral, the attention-output gate was worse at `2.4997` BPB,
+  the stacked public-style row went nonfinite, and the l11/r5 soft ladder was
+  pruned as slower/worse.
+- Completed 16MB cap-speed scout:
+  `records/vocabmoe16-cap-speed-scout-3k-auto-20260427-075723`. The fully
+  aggressive fp16-param/no-GradScaler/no-fp32-loss speed profile collapsed
+  exported BPB to roughly `4.15`; reject that profile for quality runs.
 - New 16MB setup groups:
   `cap16_mainline` spends the cap on d768/d896 width, e384 embeddings, q6/q4
   taper variants, QK 5.25, stronger LQER, and VocabMoE input+loop-first.
@@ -67,11 +110,83 @@ The short current read:
   TTT.
   `cap16_dual_stream` adds an opt-in trained left/right advisor bridge on top
   of that spine.
-- New queue discipline:
-  `scripts/queue_16mb_selective_overnight.ps1` waits for scouts, ranks rows by
-  exported BPB, runs the leaderboard-inspired HRC/VocabMoE blend rows at 5k,
-  reruns only the best few scout rows at 5k steps, and gates 5k dual-stream
-  canaries behind a configurable mainline BPB threshold.
+- Queue discipline:
+  the broad `scripts/queue_16mb_selective_overnight.ps1` path exists, but it is
+  too expensive for the current local GPU window. The overnight queue used a
+  narrower pattern: a cap-speed scout, seven focused 3k rows, then
+  `scripts/queue_16mb_promote_top2_after_focused.ps1` reran only the best two
+  successful exported-BPB rows at 5k. That selection policy worked; the promoted
+  rows just did not beat the existing anchor.
+- Focused 16MB public-lever read:
+  `records/focused-16mb-after-capspeed-3000-auto-20260427-100310` and
+  `records/promote-top2-16mb-5000-auto-20260427-101142` show that sparsegate,
+  depth LoRA, cycle-rev routing, d768/d896 width, and e384 embeddings did not
+  transfer into a win on this HRC/VocabMoE spine. `i3/l5/r2` improved from
+  `1.9843` at 3k to `1.8816` at 5k, but remained worse than the d640/e256
+  control at `1.8710`.
+- Pruned 16MB cap-spend matrix:
+  `records/cap16-anchor-spend-5k-auto-20260427-224216` was stopped after row 3.
+  The fresh d640/e256 control landed at `1.8759` BPB, but QK 5.25 plus stronger
+  LQER lost badly at `1.9435` BPB, and e384 plus even heavier LQER still lost at
+  `1.9331` BPB. Since the remaining rows were all confounded by that same
+  QK/heavy-LQER recipe, the matrix was pruned before row 4 wasted a full run.
+- Pruned 16MB clean-speed cap-spend matrix:
+  `records/cap16-anchor-clean-spend-5k-auto-20260428-023242` was stopped after
+  its first row because even the d640/e256 control with only the stable speed
+  bundle exported at `1.9699` BPB. The train-time validation was much better
+  (`1.7209` BPB) than the export roundtrip, so the speed bundle is widening the
+  train/export quantization gap and should not be used for quality rows.
+- Pruned 16MB no-speed cap-spend matrix:
+  `records/cap16-anchor-nospeed-spend-5k-auto-20260428-034805` reran the same
+  byte-spend ideas on the older export-honest path: e384/e512 embeddings, q8
+  train/export, moderate d704 width, larger VocabMoE rank/expert counts, and
+  d640 i3/l5/r2 loop diversity.
+- First no-speed cap-spend result:
+  e384 with q6 was negative (`1.8967` BPB), but e512 with q8 was strongly
+  positive (`1.7347` BPB, `11,646,042` bytes). The lesson is not "bigger
+  embeddings help"; it is "token-interface spend needs matching q8 train/export
+  precision to survive the export roundtrip."
+- Pruned q8 cap-fill matrix:
+  `records/cap16-q8-capfill-5k-auto-20260428-073610` was stopped before row 1
+  finished because it was too broad for the remaining time.
+- Completed priority matrix:
+  `records/cap16-priority-5k-auto-20260428-074526` ran only four distinct
+  high-signal probes on top of the d640/e512/q8 win: e640 q8 token-interface
+  cap-fill, q8 VocabMoE k16/r4, i3/l5/r2 loop diversity, and the true dual-
+  stream advisor bridge.
+- First priority results:
+  e640 q8 lost (`1.7801` BPB, `12,550,926` bytes), and q8 VocabMoE k16/r4 also
+  lost (`1.7532` BPB, `11,770,274` bytes). The i3/l5/r2 loop-diversity row then
+  landed as a major positive: `1.5519` BPB, `922.12ms/step`, `13,782,066`
+  bytes. The new 16MB local best is therefore d640/e512/q8 plus more unique loop
+  blocks. The follow-up `i3/l5/r5` then improved further to `1.5415` BPB,
+  `1559.74ms/step`, and `13,814,802` bytes, confirming that more recurrence on
+  the wider unique core buys quality. The dual-stream canary on the old i3/l3/r3
+  spine finished close but second-best at `1.5645` BPB, `863.90ms/step`, and
+  `11,388,186` bytes.
+- Completed structure follow-up:
+  `records/cap16-structure-followup-5k-auto-20260428-174616` is a two-row,
+  quality-first probe on the new best i3/l5/r5 spine: one trained dual-stream
+  advisor row with input, loop-first, loop-exit, and pre-output bridges; one
+  hourglass/data-density row with widths
+  `400,480,560,640,640,640,640,640`. This is intentionally narrow: dual-stream
+  already came close on the old i3/l3/r3 spine, and hourglass is the user's
+  width-vs-precision idea tested without launching a broad width sweep. Result:
+  dual-only was a near miss at `1.5440` BPB; hourglass-only was faster/smaller
+  but worse at `1.5534` BPB.
+- Completed structure combo:
+  `records/cap16-structure-combo-5k-auto-20260428-180151` contains one
+  interaction row,
+  `structure_combo_i3l5r5_d640e512_q16q8q4io_q8core_w400-480-560-640_dual`.
+  It combines the train-time IO-tail quant ladder q16/q8/q4, q8 recurrent
+  core, the same width schedule, and the same dual-stream bridge. This was the
+  interaction test against the completed dual-only and hourglass-only controls.
+- Result: the combo row exported at `1.5565` BPB, `1500.47ms/step`, and
+  `13,816,482` bytes. Its final train-time validation was close to the best
+  baseline (`1.5411` BPB), but export roundtrip landed far worse. Do not
+  promote this interaction. The likely failure mode is export sensitivity from
+  mixing IO-tail q4, width adapters, and dual-stream while also disabling
+  depth-LoRA/basis/VE for the width schedule.
 - Next prepared matrix group:
   `sub4_leader_levers` in `scripts/run_sub4_iotail_quant_matrix.py`, covering
   QK gain, scalar SmearGate, attention-output gates, sparse attention gates,
@@ -112,7 +227,8 @@ Rules:
   to continue or prune a lane.
 - Freeze weak lanes until a new mechanism addresses their failure mode. Current
   examples: council/RLM-lite is frozen until the export gap is fixed; broad
-  spike sweeps are frozen until the two corrected spike probes show promise.
+  d768/d896 VocabMoE width sweeps are frozen until a schedule/optimizer change
+  directly targets the observed loss.
 - Use staged budgets for speculative ideas: first 1-2 corrected probes, then a
   focused follow-up only if they come close to the anchor.
 - Stop broad "because it exists" matrices. Candidate count should stay small
@@ -120,15 +236,23 @@ Rules:
 
 Current queue policy:
 
-- Keep the active pruned queue because its remaining rows are still high-signal:
-  `i4l11r5` softer ladder, two corrected spike probes, and two width-density
-  probes. The public-style sub4 stack was pruned after going nonfinite.
-- Cancelled the extra focused spike wait-queue that would have added seven more
-  rows. It should only be relaunched if the two corrected spike probes beat or
-  nearly match the dense VocabMoE anchor.
-- Queue the 16MB cap-speed scout after the active pruned queue, not in parallel,
-  because the d768 rows need clean GPU telemetry and should not compete with
-  local games or other CUDA work.
+- The local queue is intentionally in non-record/art mode. Do not restart broad
+  cap-fill or leaderboard-chasing sweeps unless the user explicitly pivots back
+  to record-contender work. The current active matrix is
+  `records/cap16-art-showcase-2k-auto-20260429-173955`, and the next decision
+  is which one or two weird rows deserve 5k promotion.
+- Relaunch spike/self-election only as one or two targeted rows around the
+  current d640/e256 anchor, because the corrected spikehybrid row was close but
+  not a win.
+- Do not run more broad d768/d896 width sweeps locally unless the schedule or
+  optimizer changes; the focused queue showed bigger width and e384 embeddings
+  were worse under the 3k proxy.
+- The full fp16-param local speed profile is rejected for quality: two
+  cap-speed rows finished around `4.15` exported BPB despite being faster. Use
+  the stability-safe dtype path for future 16MB rows: fp32 params, fp32 Muon,
+  GradScaler on, fp32 loss, and `GRAD_ACCUM_STEPS=4`. Keep the safe speed
+  levers only: fused QKV, train-time q6 forward, pinned/persistent host IO, and
+  final-only validation.
 
 ## 2026-04-26 Leaderboard-Inspired Addendum
 
@@ -206,6 +330,8 @@ Knobs:
   `QUANT_BITS_OVERRIDES`, `QUANT_TERNARY_PATTERNS`, and `TRAIN_QUANT_FORWARD`.
 - runner group: `sub4_width_ladder` in
   `scripts/run_sub4_iotail_quant_matrix.py`.
+- 16MB runner group: `cap16_structure_followup` in
+  `scripts/run_16mb_vocab_moe_matrix.py`.
 
 Implementation:
 
@@ -253,8 +379,19 @@ First queued candidates:
 Current read:
 
 - Implemented and smoke-tested on CPU forward/backward.
-- Not yet locally scored. The key comparison will be against the non-ladder
-  `attncore1` row at `2.4884` BPB.
+- First pruned scored rows did not beat the non-ladder `attncore1` reference.
+  The best width-ladder row exported at `2.5075` BPB, `269.37ms/step`, and
+  `5,730,884` bytes, so the current adapter-style width ladder is a loser until
+  a new implementation reduces its extra matmul cost.
+- A 16MB hourglass row is now active on the current best i3/l5/r5 q8/e512
+  spine: `structure_hourglass_i3l5r5_d640e512_q8_w400-480-560-640`, with
+  `LAYER_WIDTH_SCHEDULE=400,480,560,640,640,640,640,640`. This tests whether
+  the same data-density idea helps when the model is not starved by the 4MB
+  target.
+- Result: hourglass-only exported at `1.5534` BPB, `1423.07ms/step`, and
+  `13,102,734` bytes. It is smaller and faster than the full-width i3/l5/r5
+  baseline, but quality is worse than the `1.5415` baseline. Do not promote the
+  current adapter-style width schedule by itself.
 
 ## 16MB Vocabulary-MoE Lever
 
@@ -298,7 +435,7 @@ Why this is in the 16MB lane:
   same tensors at export, so the score is the exported model rather than a
   full-precision training-only proxy.
 
-Queued local probes:
+Implemented probe set:
 
 - `i3l3r3_d640e256_q6_publicstack_control`
 - `i3l3r3_d640e256_q6_vocabmoe_static_k16r2_input`
@@ -354,11 +491,14 @@ Anchor:
 
 Applied levers:
 
-- `PARAM_DTYPE=fp16`, `TRAIN_CASTED_LINEAR_PARAM_DTYPE=model`, and
-  `MUON_DTYPE=fp16` so the heavy trainable linears are lower precision from the
-  start instead of only cast during matmul.
-- `USE_GRAD_SCALER=0`, `LOSS_FP32=0`, `POST_STEP_ZERO_GRAD=0`, and
-  `TRAIN_FUSED_QKV=1` from the sub-4 speed lane.
+- Rejected: `PARAM_DTYPE=fp16`, `MUON_DTYPE=fp16`, `USE_GRAD_SCALER=0`,
+  `LOSS_FP32=0`, `POST_STEP_ZERO_GRAD=0`, and `GRAD_ACCUM_STEPS=2`. This was
+  faster but collapsed final export BPB to about `4.15`.
+- Keep: `TRAIN_FUSED_QKV=1`, pinned/persistent host IO, final-only validation,
+  and train-time q6 forward.
+- Stable quality path: `PARAM_DTYPE=fp32`, `MUON_DTYPE=fp32`,
+  `USE_GRAD_SCALER=1`, `LOSS_FP32=1`, `POST_STEP_ZERO_GRAD=1`, and
+  `GRAD_ACCUM_STEPS=4`.
 - `TRAIN_QUANT_FORWARD=1`, `QUANT_WEIGHT_BITS=6`, and
   `VOCAB_MOE_TRAIN_QUANT_BITS=6` so the q6 path is trained rather than only
   exported.
@@ -372,6 +512,12 @@ Candidate group:
 - runner group: `--candidate-group cap16_speed` in
   `scripts/run_16mb_vocab_moe_matrix.py`.
 - queue script: `scripts/queue_16mb_cap_speed_after_current.ps1`.
+
+Current read:
+
+- The completed cap-speed scout is a negative result for fp16 trainable params:
+  `d640/e256` exported at `4.1589` BPB and `d768/e256` at `4.1472` BPB. Do not
+  use that profile for quality rows.
 
 Rows:
 
@@ -409,8 +555,9 @@ Ingredients:
 - QK gain `5.25`.
 - LQER r16/t32 for richer quantization-error repair on block matrices and the
   factored embedding projections.
-- The sub-4 speed profile: fp16 params, fp16 Muon, fused QKV, no GradScaler,
-  no post-step grad zeroing, and no avoidable fp32 cast path.
+- Stable local speed profile: fused QKV, train-time q6 forward, final-only
+  validation, host prefetch/persistent buffers, but fp32 params, fp32 Muon,
+  GradScaler, fp32 loss, and `GRAD_ACCUM_STEPS=4`.
 
 Rows:
 
@@ -439,8 +586,8 @@ Runner group: `--candidate-group cap16_leaderboard`.
 Ingredients:
 
 - Same lossless CaseOps/SP8192, q6 train-time forward, VocabMoE
-  `input,loop_first`, HRC route, fused QKV, fp16 Muon, and LQER r16/t32 spine as
-  the mainline d768/e320 candidates.
+  `input,loop_first`, HRC route, fused QKV, stable fp32 Muon path, and LQER
+  r16/t32 spine as the mainline d768/e320 candidates.
 - `MUON_NS_VARIANT=polar_express` and `LR_MIN_SCALE=0.026`, matching the public
   Polar/MIN_LR idea while keeping the rest of the run auditable.
 - QK-gain push from `5.25` to `5.5` as a one-row transfer test.
@@ -555,6 +702,23 @@ Decision:
 - If i3/l5/r2 dual wins, the bridge helps most when the loop has more unique
   physical blocks.
 
+Current read:
+
+- The first true canary,
+  `priority_dual_i3l3r3_d640e512_q8_left256_r16`, exported at `1.5645` BPB,
+  `863.90ms/step`, and `11,388,186` bytes. This is much better than the old
+  i3/l3/r3 q8 anchor (`1.7347`) and byte-efficient, but still behind the
+  i3/l5/r2 unique-loop row (`1.5519`).
+- The follow-up test was
+  `structure_dual_i3l5r5_d640e512_q8_left256_r16_loopx`, with bridge sites
+  `input,loop_first,loop_exit,pre_output`. It compares dual-stream directly
+  against the best known single-stream spine instead of the older i3/l3/r3
+  scaffold.
+- Result: the i3/l5/r5 dual-stream row exported at `1.5440` BPB,
+  `1591.48ms/step`, and `13,770,082` bytes. This is a strong near miss, but it
+  does not beat the single-stream i3/l5/r5 baseline at `1.5415` BPB, so the
+  bridge should not be promoted. The completed combo row did not rescue it.
+
 ## 16MB Spiking / Self-Election Vocab-MoE
 
 Goal: test the user's "each token expert elects itself" idea without launching
@@ -633,7 +797,6 @@ Queued local probes:
 
 Current read:
 
-- Implemented as a new optional path, but not yet validly scored.
 - The first full spike queue
   `records/vocabmoe16-spike-5k-auto-20260426-195631` did not actually train:
   it wrote `candidate_plan.md`, waited on the old `25%` idle-GPU threshold, and
@@ -642,14 +805,13 @@ Current read:
   all-zero token priors can tie every token into the same expert bucket at step
   zero. The candidate definitions now use `VOCAB_MOE_PRIOR_INIT_STD=0.01` for
   spike rows to make self-election real from the first forward pass.
-- The active pruned queue includes two corrected spike probes after the sub4
-  leader rows:
-  `spikestatic_k16r2_input_top2` and
-  `spikehybrid_k16r2_input_loopfirst_top2`.
-- A focused post-current queue is prepared in
-  `scripts/queue_vocabmoe_spike_focused_after_current.ps1`, but it is not
-  currently scheduled. Run it only if the two corrected spike probes in the
-  active pruned queue beat or nearly match the dense VocabMoE anchor.
+- The corrected pruned spike run produced real final-export scores:
+  `spikehybrid_k16r2_input_loopfirst_top2` reached `1.8792` BPB at
+  `866.19ms/step`, and `spikestatic_k16r2_input_top2` reached `1.8953` BPB at
+  `838.47ms/step`.
+- Conclusion: hybrid self-election is close enough for one or two targeted
+  follow-ups, but it did not beat the dense d640/e256 VocabMoE anchor at
+  `1.8710`. Do not launch the whole spike matrix without a new hypothesis.
 
 ## 16MB Council, Dynamic Depth, And RLM-Lite
 
@@ -1897,6 +2059,9 @@ Cost/risk:
 Current read:
 
 - Keep enabled in speed-focused lanes where verified.
+- On the first 1xH100 RunPod row, turning this on moved the near-cap HRC/VocabMoE
+  anchor from about `314 ms/step` to about `298 ms/step` while preserving the
+  same logical Q/K/V projection capacity.
 
 ### Lower Precision Params And Optimizer State
 
@@ -1935,6 +2100,9 @@ Knobs:
 - `VAL_LOSS_EVERY=0` for speed probes.
 - `SKIP_INITIAL_VAL=1`
 - `TRAIN_LOG_EVERY`
+- `TRAIN_ABORT_ON_NONFINITE=0` after a stability smoke.
+- `TRAIN_DEBUG_NONFINITE=0`
+- `WARMUP_STEPS=0` when `DISABLE_COMPILE=1`.
 
 Upside:
 
@@ -1945,11 +2113,15 @@ Cost/risk:
 
 - Less monitoring during runs.
 - Need final validation to avoid fooling ourselves.
+- Disabling nonfinite scans should only happen after the row family has already
+  smoked cleanly.
 
 Current read:
 
 - Good for speed probes.
 - Serious matrix rows should still produce final artifacts and final validation.
+- On 1xH100, fused QKV plus disabled every-step nonfinite scans and disabled
+  redundant post-step zeroing moved the same anchor to about `271 ms/step`.
 
 ### Loss Shortcuts
 
@@ -2170,6 +2342,37 @@ Status:
 - Not automatically promoted; publicstack helped 1k export-aware screens but
   not enough later.
 
+### Asymmetric Logit Rescale
+
+Goal: small train-time/eval-time calibration lever for quantized logits.
+
+Knobs:
+
+- `ASYM_LOGIT_RESCALE=1`
+- `LOGIT_SOFTCAP`
+
+Upside:
+
+- Late public PRs found that separate positive/negative softcap scales can
+  recover a small amount of BPB when stacked with quantization repair and TTT.
+- It costs only two scalar parameters and is compatible with our HRC/VocabMoE
+  output path.
+
+Cost/risk:
+
+- The public gain appeared in an AWQ-lite plus LoRA/phased-TTT stack; our lane
+  does not use that exact export/eval pipeline.
+- It is a calibration lever, not a capacity lever. Test it only as a direct A/B
+  on an otherwise strong row.
+
+Current read:
+
+- Implemented as `ASYM_LOGIT_RESCALE`.
+- One H100 A/B row is queued in `h100_1x_baseline_chase`:
+  `h100_chase_asym_i3l5r2_d768e896_q16q8q8io_q8core_lqer16t32_vocabmoe_qk55_w2200_wd02`.
+- Do not launch a broader asym sweep unless the A/B beats the matching
+  non-asym row.
+
 ### Polar/Gram Muon, Row Norm, Muon WD
 
 Goal: optimizer quality.
@@ -2355,11 +2558,20 @@ Do not promote these without new evidence:
 
 ### If The Goal Is Better Sub-16
 
-1. Stay close to q6 proof plus CaseOps/SP8192.
-2. Resume LQER/frozen-carry/publicstack ladder.
-3. Add speed probes only if loss movement tracks baseline.
-4. Implement or isolate legal full TTT.
-5. Consider larger architecture branches separately from HRC incremental work.
+1. Use `frontier_polarminlr10_i3l5r5_d640e512_q8` as the current quality
+   control: `1.53362322` export BPB, `14,091,166` bytes.
+2. Keep the full-width single-stream HRC/VocabMoE spine until a candidate
+   beats it after export. Dual-stream, hourglass widths, and the IO-tail q4
+   combo were all near-misses or negatives.
+3. Spend remaining bytes selectively. The active cap-fill rows test e640
+   factored embeddings and stronger LQER including `embed_proj`.
+4. Port public leaderboard levers one at a time or in very small bundles:
+   QK 5.25, parallel residuals, Polar Express Newton-Schulz, and a warmdown
+   LR floor.
+5. Add speed probes only after export BPB holds. The fp16-param speed profile
+   was rejected because it collapsed exported BPB.
+6. Consider larger architecture branches such as GDN/FLA separately from HRC
+   incremental work.
 
 ### If The Goal Is A Safe Tokenizer Improvement
 
@@ -2371,12 +2583,80 @@ Do not promote these without new evidence:
 
 ## Current Best Next Bets
 
-1. Run a 10-minute wall-clock comparison between `i4l9r5`, `i5l9r5`,
-   `i5l5r9`, and the q884 r3 wall-clock anchor.
-2. Explore i4/l9 size/quality tweaks around r5 rather than adding more repeats.
-3. Improve the q884 r3 legal row or shave the q884 `r6` soft-cap row.
-4. Run the d1536/e384 and d2048/e512 H100 capacity ladder with export-honest
-   train-time quant.
-5. Resume sub-16 LQER/frozen-carry/publicstack after the corrected carry block
-   selector.
-6. Build the safe tokenizer sweep only with exact byte accounting.
+1. Finish the active `cap16_frontier_capfill` matrix:
+   `records/cap16-frontier-capfill-5k-auto-20260429-003802`.
+2. Promote only a row that beats `1.53679911` final export BPB on the current
+   i3/l5/r5 q8/e640 control.
+3. e640 won over the old e512 control, and Polar/MIN_LR beat e640. The best
+   next test is their interaction: e640+Polar, then e768+Polar if bytes allow.
+4. LQER r12/t24 plus `embed_proj` on the e512 spine was a small positive
+   (`1.54073632` vs `1.54148844` BPB) but did not beat e640, so treat LQER as a
+   repair/combo lever rather than the primary cap-spend path.
+5. The recovered `cap16_frontier_followup` group is now focused on the new
+   signal: e640+Polar, e768+Polar, e640+Polar+LQER, and e640+Polar with a 5%
+   LR floor.
+6. If LQER wins in combination with e640, run a tiny LQER rank/top-K follow-up around the winning
+   include pattern; if it loses, treat extra sidecar bytes as saturated.
+7. If Polar/MIN_LR wins, combine it with the best byte-spend row; if it loses,
+   keep the older schedule for this HRC family.
+8. QK 5.25 plus parres4 was negative (`1.54894140` BPB), so do not spend more
+   rows there on this spine.
+9. For sub-4, keep `i4l9r5` as the soft-target quality reference and avoid
+   broad reruns until the 16MB lane gives a new transferable idea.
+10. Build the safe tokenizer sweep only with exact byte accounting.
+
+## H100 Art-Lane Update: 2026-04-30
+
+The strongest legal H100 spine has shifted from the older local 5k controls to:
+
+```text
+h100_batch32k_d704e832_w2200_q8_coreattn1_lqer10t20_vocabmoe_qk55
+final export BPB: 1.35692129
+artifact: 15,658,145 bytes
+step speed: 119.57 ms
+```
+
+The key active levers now are not broad width sweeps. They are targeted
+architecture evolutions around that spine:
+
+1. **Exit-side LexLoRE**: `VOCAB_MOE_LAYERS=input,loop_first,loop_last`.
+   Tests whether lexical experts should advise the mirrored write-out side,
+   not only the read-in and loop-entry side.
+2. **Warmer LexLoRE**: rank 4, `VOCAB_MOE_PRIOR_INIT_STD=0.01`, and
+   `VOCAB_MOE_SCALE_INIT=0.08`. Tests whether the expert bank wakes up fast
+   enough in a 10-minute wall-clock run.
+3. **More LexLoRE bins**: 32 experts at rank 2. Tests more token clustering
+   without changing the core model shape.
+4. **CycleFuse**: `HRC_CYCLE_FUSE_ENABLED=1`. Lets later HRC passes receive
+   compressed first-pass state summaries.
+5. **ValueEmbedding**: `VE_ENABLED=1`, cap-safe `VE_DIM=32`, `VE_LAYERS=3`.
+   Injects token-conditioned information into the value stream of the first
+   core attention block.
+6. **Partial-tail recurrence**: cloned-trainer route
+   `transition_tail3_cycle`, i.e. `012|34567|34567|567|210`, with loop index.
+   Tests whether refining only the deepest semantic tail beats another full
+   recurrent pass.
+
+These are queued in `scripts/run_h100_arch_evolution_matrix.py` and use
+`train_gpt_arch_evolution.py` so the current best-family trainer remains stable.
+
+The preceding `h100_1x_beat135_exportfix` queue did not promote. e864 and e800
+were slightly over cap once counted code was included, and the legal e768/r11t22
+row landed at `1.36275698` BPB. Treat this as evidence that raw embedding/LQER
+spend around the same route is saturated; spend the next H100 time on the
+architecture-evolution levers above.
+
+First evolution result: exit-side LexLoRE at
+`VOCAB_MOE_LAYERS=input,loop_first,loop_last` finished at `1.35868072` BPB with
+`256,958` bytes of headroom. It is legal and coherent, but not a promotion over
+the `1.35692129` best legal row.
+
+Warm rank-4 LexLoRE finished at `1.36211877` BPB with `239,290` bytes headroom,
+so larger rank plus non-uniform priors is a negative on this 10-minute H100
+budget. Keep future LexLoRE changes small unless the 32-expert rank-2 row
+contradicts that.
+
+The 32-expert rank-2 LexLoRE row did not contradict it: `1.36056721` BPB and
+`109,898` bytes over cap. CycleFuse was worse still at `1.36939320` BPB and
+slowed steps to `133.07ms`. Current read: LexLoRE should stay gentle if kept,
+and CycleFuse is not worth more H100 time on this spine.

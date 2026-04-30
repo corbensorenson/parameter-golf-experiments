@@ -94,6 +94,7 @@ def plain_loop_route(io_width: int, loop_width: int, loop_repeats: int) -> dict[
     """Build entry-tail + repeated-loop + mirrored-exit HRC route settings."""
     effective_depth = io_width + loop_width * loop_repeats + io_width
     return {
+        "MODEL_FAMILY": "hrc",
         "NUM_UNIQUE_BLOCKS": str(io_width + loop_width),
         "EFFECTIVE_DEPTH": str(effective_depth),
         "HRC_RECURSIVE_CORE_START": str(io_width),
@@ -107,6 +108,7 @@ def superloop_skip0_route(io_width: int, loop_width: int, loop_repeats: int) -> 
     """Build the skip0 superloop counterpart for the same plain loop order."""
     effective_depth = io_width + loop_width * loop_repeats + io_width
     return {
+        "MODEL_FAMILY": "hrc",
         "NUM_UNIQUE_BLOCKS": str(io_width + loop_width),
         "EFFECTIVE_DEPTH": str(effective_depth),
         "HRC_RECURSIVE_CORE_START": str(io_width),

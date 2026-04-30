@@ -125,6 +125,7 @@ def route_env(
     if not io_width <= mlp_only_start <= unique_blocks:
         raise ValueError("mlp_only_start must be inside the recursive core or at the end")
     return {
+        "MODEL_FAMILY": "hrc",
         "MODEL_DIM": str(model_dim),
         "FACTORED_EMBED_DIM": str(embed_dim),
         "NUM_HEADS": str(heads),
@@ -1355,6 +1356,22 @@ def selected_candidates(raw: str, groups: list[str] | None = None) -> list[dict[
     return out
 
 
+def parse_env_assignments(raw: str) -> dict[str, str]:
+    overrides: dict[str, str] = {}
+    for item in raw.replace(";", ",").split(","):
+        item = item.strip()
+        if not item:
+            continue
+        if "=" not in item:
+            raise ValueError(f"env override must be KEY=VALUE, got {item!r}")
+        key, value = item.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise ValueError(f"env override has an empty key: {item!r}")
+        overrides[key] = value.strip()
+    return overrides
+
+
 def read_gpu_status() -> tuple[int, int] | None:
     try:
         proc = subprocess.run(
@@ -1444,7 +1461,9 @@ def run_matrix(
     idle_max_memory_mib: int,
     idle_seconds: int,
     idle_poll_seconds: int,
+    run_env_overrides: dict[str, str] | None = None,
 ) -> list[dict[str, object]]:
+    run_env_overrides = dict(run_env_overrides or {})
     rows: list[dict[str, object]] = []
     for candidate in candidates:
         name = str(candidate["name"])
@@ -1477,6 +1496,7 @@ def run_matrix(
                 "PYTHONUNBUFFERED": "1",
             }
         )
+        env.update(run_env_overrides)
         started = time.perf_counter()
         proc = run_command([str(PYTHON), "train_gpt_ternary.py"], env, timeout=timeout)
         stdout = merged_train_output(proc.stdout, run_id)
@@ -1500,6 +1520,9 @@ def run_matrix(
             "raw_log": raw_path.name,
             "run_id": run_id,
             "env_overrides": ",".join(f"{key}={value}" for key, value in sorted(candidate["env"].items())),
+            "run_env_overrides": ",".join(
+                f"{key}={value}" for key, value in sorted(run_env_overrides.items())
+            ),
         }
         parsed = parse_train(stdout)
         if parsed:
@@ -1620,6 +1643,12 @@ def main() -> int:
     parser.add_argument("--idle-max-memory-mib", type=int, default=2500)
     parser.add_argument("--idle-seconds", type=int, default=20)
     parser.add_argument("--idle-poll-seconds", type=int, default=5)
+    parser.add_argument("--run-env", default="")
+    parser.add_argument("--train-batch-tokens", type=int, default=0)
+    parser.add_argument("--train-seq-len", type=int, default=0)
+    parser.add_argument("--val-batch-size", type=int, default=0)
+    parser.add_argument("--train-log-every", type=int, default=0)
+    parser.add_argument("--train-quant-embeddings", action="store_true")
     parser.add_argument("--list", action="store_true")
     args = parser.parse_args()
 
@@ -1631,6 +1660,17 @@ def main() -> int:
     out_dir = Path(args.out) if args.out else ROOT / "records" / f"sub4_iotail_quant_{time.strftime('%Y%m%d_%H%M%S')}"
     out_dir.mkdir(parents=True, exist_ok=True)
     write_candidate_plan(out_dir, candidates, args.iterations)
+    run_env_overrides = parse_env_assignments(args.run_env)
+    if args.train_batch_tokens > 0:
+        run_env_overrides["TRAIN_BATCH_TOKENS"] = str(args.train_batch_tokens)
+    if args.train_seq_len > 0:
+        run_env_overrides["TRAIN_SEQ_LEN"] = str(args.train_seq_len)
+    if args.val_batch_size > 0:
+        run_env_overrides["VAL_BATCH_SIZE"] = str(args.val_batch_size)
+    if args.train_log_every > 0:
+        run_env_overrides["TRAIN_LOG_EVERY"] = str(args.train_log_every)
+    if args.train_quant_embeddings:
+        run_env_overrides["TRAIN_QUANT_EMBEDDINGS"] = "1"
     rows = run_matrix(
         out_dir=out_dir,
         candidates=candidates,
@@ -1649,6 +1689,7 @@ def main() -> int:
         idle_max_memory_mib=args.idle_max_memory_mib,
         idle_seconds=args.idle_seconds,
         idle_poll_seconds=args.idle_poll_seconds,
+        run_env_overrides=run_env_overrides,
     )
     write_summary(out_dir, rows)
     print(out_dir)

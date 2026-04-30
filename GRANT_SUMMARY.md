@@ -8,9 +8,9 @@ sub-4MB and sub-16MB language-model submissions competitive under the
 
 I am exploring two connected ideas:
 
-1. A mirrored IO-tail / recurrent-middle architecture. The model has higher
+1. MirrorLoop Recurrent Core, called `HRC` in code. The model has higher
    capacity entry and exit blocks around a tied looped core, for example
-   `012|345|210`. The goal is to reuse a small number of parameters several
+   `012|345|345|210`. The goal is to reuse a small number of parameters several
    times while giving the recurrent middle enough loop/depth signal to know
    where it is in the computation.
 2. Train-time mixed precision by layer. Instead of training a dense model and
@@ -20,15 +20,18 @@ I am exploring two connected ideas:
    middle is trained as ternary or lower precision.
 
 Supporting pieces include factored tied embeddings for 8192-token vocabularies,
-LQER low-rank residual sidecars for quantization error recovery, lossless
-CaseOps tokenization experiments, and local 2060 SUPER wall-clock matrices
-before scaling to larger GPU runs.
+Lexical Low-Rank Experts (LexLoRE, still called `VocabMoE` in code), LQER
+low-rank residual sidecars for quantization error recovery, lossless CaseOps
+tokenization experiments, and local 2060 SUPER wall-clock matrices before
+scaling to larger GPU runs.
 
 ## What Has Been Tried
 
-- Ported train-time ternary layers into HRC / IO-tail model families.
+- Ported train-time ternary layers into the MirrorLoop / IO-tail model family.
 - Added factored tied embeddings to make sub-4MB artifacts realistic with larger
   vocabularies.
+- Added LexLoRE token-conditioned low-rank experts at input and loop-entry
+  sites for the 16MB family.
 - Added mixed q8/q6/q4/ternary export and lzma artifact compression under a
   decimal 4,000,000 byte cap.
 - Added LQER residual sidecars and fixed strict final reload validation.
