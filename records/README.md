@@ -71,6 +71,10 @@ Important current results:
   `break_prime_skip_superloop_d640e768` reached `1.35504224` BPB at
   `107.87ms/step`, with `14,051,162` bytes. It beats the pod control, has
   almost `1.95MB` headroom, and should be the next H100 cap-spend anchor.
+- Prime-follow caveat:
+  a follow-up queue was launched after the break-cliff scout, but the RunPod
+  endpoint became unreachable and then shut down before logs were copied back.
+  Treat `prime_follow_*` as unscored unless the RunPod volume is recovered.
 - Best under/around-8MB local evidence:
   q6 HRC/VocabMoE rows around `6.2MB` reached about `1.87` BPB locally. That
   lane is better than the ternary IO-tail lane when quality matters more than

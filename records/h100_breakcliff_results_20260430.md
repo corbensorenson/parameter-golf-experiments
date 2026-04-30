@@ -114,3 +114,14 @@ Then spend the `~1.95MB` headroom deliberately:
 This is now the cleanest novel architecture story: MirrorLoop with a prime
 skip-program recurrent core, LexLoRE at input/loop entry, train-time q8
 forward/export, LQER repair, and CaseOps/SP8192.
+
+## Post-Shutdown Note
+
+A prime-follow queue was launched after these results to spend the prime-skip
+headroom on `d704/e768`, `d640/e896`, `d640/e1024`, prime+coreattn2, and
+stronger LQER. The first full row started and reached step 10 with high H100
+utilization, but the RunPod SSH endpoint became unreachable and the pod later
+shut down before artifacts could be copied back.
+
+Those `prime_follow_*` rows are therefore not scored evidence. The preserved
+two-hour evidence is the break-cliff table above.
