@@ -39,9 +39,10 @@ main submitted 8x score.
 ## Documentation First
 
 The experiment notes are intentionally detailed, but they are no longer all
-equal source-of-truth. Start with `records/README.md` for the documentation map
-and `records/h100_speed_audit_20260430.md` for the live RunPod/H100 state.
-For the architecture vocabulary used in grant/non-record writeups, read
+equal source-of-truth. Start with `SUBMISSION.md` for the final reviewer-facing
+summary, then `records/README.md` for the documentation map and
+`records/h100_speed_audit_20260430.md` for the RunPod/H100 ledger. For the
+architecture vocabulary used in grant/non-record writeups, read
 `records/architecture_explainer_20260430.md`.
 Generated run directories under `records/` are raw evidence; the human-written
 Markdown files are the interpretation layer.
@@ -114,6 +115,8 @@ priorities, not claim final scores.
 
 - `train_gpt.py` - main CUDA trainer with HRC routing, quantized export, LQER,
   mixed-quant forward training, and sub-16 speed probes.
+- `SUBMISSION.md` - final reviewer-facing summary: claim boundary, best
+  preserved evidence, architecture pitch, and negative findings.
 - `train_gpt_ternary.py` - sub-4MB wrapper with profile presets and ternary
   experiment defaults.
 - `ternary_golf/` - train-time ternary layers plus packed/dense ternary CUDA

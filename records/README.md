@@ -15,29 +15,32 @@ the interpretation layer.
 
 Start here when coming back to the project:
 
-1. `../README.md`
+1. `../SUBMISSION.md`
+   - Final reviewer-facing summary: claim boundary, best preserved 8x score,
+     prime-skip architecture signal, and negative findings.
+2. `../README.md`
    - Project overview, major model ideas, repo layout, and common commands.
-2. `./architecture_explainer_20260430.md`
+3. `./architecture_explainer_20260430.md`
    - Submission-facing explanation of MirrorLoop/HRC, LexLoRE/VocabMoE,
      train-time quantization, LQER, width ladders, dual-stream bridges, and
      what is actually novel.
-3. `./track_non_record_16mb/2026-04-30_Corben_MirrorLoop_LexLoRE_HRC/README.md`
+4. `./track_non_record_16mb/2026-04-30_Corben_MirrorLoop_LexLoRE_HRC/README.md`
    - Actual non-record/art submission README. This is the reviewer-facing
      summary with the best preserved 8x result, links to the public experiment
      repo, and honest negative findings.
-4. `./h100_speed_audit_20260430.md`
+5. `./h100_speed_audit_20260430.md`
    - Current paid RunPod/H100 ledger, including live/queued jobs, corrected
      H100 speed settings, cap problems, and the latest cloud results.
-5. `./h100_breakcliff_results_20260430.md`
+6. `./h100_breakcliff_results_20260430.md`
    - Latest 1xH100 architecture scout. Prime-skip HRC is the new best
      architecture signal and has the cleanest next-step headroom.
-6. `../levers.md`
+7. `../levers.md`
    - Full lever catalog: quality, speed, size, tokenizer, legality, and systems
      knobs explored so far.
-7. `./experiment_synthesis_20260426.md`
+8. `./experiment_synthesis_20260426.md`
    - Older but still useful synthesis across sub-4, sub-16, tokenizer, and
      systems work.
-8. `./overnight_synthesis_20260427.md`
+9. `./overnight_synthesis_20260427.md`
    - Close-out of council/RLM, spike VocabMoE, sub-4 soft-size, cap-speed, and
      top-2 promotion runs.
 
