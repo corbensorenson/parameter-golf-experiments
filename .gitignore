@@ -27,3 +27,4 @@ records/*/
 !records/*.md
 records/*.log
 records/*.pid
+artifacts/watchdog-state/
